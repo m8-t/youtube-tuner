@@ -1,8 +1,10 @@
 # youtube-tuner
 
-A Chromium MV3 extension that filters YouTube's recommendations on the home
-feed and the watch-page sidebar, keeps your subscription list in sync without
-any external API, and adds one-click controls for training YouTube itself.
+Filters YouTube's recommendations on the home feed and the watch-page
+sidebar: old, already-watched, low-view and blocked-channel videos disappear,
+your subscriptions stay. A Chromium MV3 extension that keeps your
+subscription list in sync without any external API and adds one-click
+controls for training YouTube itself.
 
 Everything runs locally. The extension makes **zero network requests** of its
 own: no telemetry, no external services, no YouTube API calls. It only reads
@@ -43,6 +45,13 @@ reinstalling.
 To move settings between machines or between an unpacked and a CRX install
 (storage is keyed to the extension ID), use the export/import buttons in the
 options page.
+
+## Usage
+
+Nothing to set up: browse YouTube and the filters apply. The toolbar badge
+shows how many videos are currently hidden on the page; clicking the icon
+toggles filtering on and off. Thresholds, the channel blocklist, manual
+subscription entries, and settings export/import live in the options page.
 
 ---
 
