@@ -14,6 +14,9 @@ open.
 - **Tests:** 244 tests with `node --test` and jsdom. A browser is not
   necessary for the tests.
 - **License:** AGPL-3.0.
+- **Writing standard:** This README uses
+  [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/).
+  The simple sentences are intentional.
 - **Language support:** The extension is verified with the German YouTube
   interface only. The English interface has code but is not tested. Other
   languages are not supported. On an unsupported language, the extension is
