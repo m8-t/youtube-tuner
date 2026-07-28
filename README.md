@@ -39,8 +39,16 @@ release has two files.
 
 ### CRX file (Helium, ungoogled-chromium)
 
-1. Download `youtube-tuner-<version>.crx`.
-2. Drag the file to the `chrome://extensions` page and release it there.
+1. Click the `youtube-tuner-<version>.crx` link with the right mouse
+   button. Select **Save Link As** and save the file.
+2. Drag the saved file to the `chrome://extensions` page and release it
+   there.
+
+Do not click the CRX link directly. A direct click makes the browser try
+an immediate installation, and this fails with the error
+`CRX_REQUIRED_PROOF_MISSING`. An alternative to step 1: set
+`chrome://flags/#extension-mime-request-handling` to "Always prompt for
+install"; then a direct click installs the file.
 
 Google Chrome does not accept CRX files from sources other than the Chrome
 Web Store. For Google Chrome, use the ZIP procedure.
