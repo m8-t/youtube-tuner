@@ -12,6 +12,13 @@ the pages you already have open.
   nothing else.
 - **248 tests**, `node --test` + jsdom, no browser dependency.
 - **License:** AGPL-3.0.
+- **Language support: German YouTube UI only, for now.** Every
+  string-dependent piece - the native menu items, the subscribe/unsubscribe
+  labels - is verified against the German UI. English equivalents exist in
+  the code but are untested against the live page, and other languages are
+  not implemented at all. Everything degrades safely on an unsupported
+  locale: actions and capture do nothing rather than clicking or writing the
+  wrong thing, and unparseable metadata leaves videos visible.
 
 ---
 
