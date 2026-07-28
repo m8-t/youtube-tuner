@@ -50,7 +50,9 @@ options page.
 
 Nothing to set up: browse YouTube and the filters apply. The toolbar badge
 shows how many videos are currently hidden on the page; clicking the icon
-toggles filtering on and off. Thresholds, the channel blocklist, manual
+toggles filtering on and off. While the subscription cache is stale the
+badge turns amber and the icon opens a small panel instead, offering the
+same toggle plus a refresh button. Thresholds, the channel blocklist, manual
 subscription entries, and settings export/import live in the options page.
 
 ---
