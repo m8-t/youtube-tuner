@@ -105,7 +105,36 @@ test('fresh count messages keep the hidden count and use the normal badge', () =
   }]);
 });
 
-test('stale subscription indicators attach the toolbar popup', async () => {
+test('absent subscription indicators use amber, attach popup, and explain collection', async () => {
+  const colors = [];
+  const popups = [];
+  const titles = [];
+
+  await refreshSubscriptionIndicators({
+    action: {
+      setBadgeBackgroundColor(options) {
+        colors.push(options);
+      },
+      setPopup(options) {
+        popups.push(options);
+      },
+      setTitle(options) {
+        titles.push(options);
+      },
+    },
+    tabs: { query: async () => [] },
+  });
+
+  assert.deepEqual(colors, [{ color: STALE_BADGE_COLOR }]);
+  assert.deepEqual(popups, [{ popup: 'popup.html' }]);
+  assert.match(
+    titles[0].title,
+    /subscription list not collected yet - click to collect/i,
+  );
+  assert.doesNotMatch(titles[0].title, /\b\d+ days? old\b/i);
+});
+
+test('stale subscription indicators use amber, attach popup, and show age', async () => {
   await chrome.storage.local.set({
     subs: {
       format: SUBS_FORMAT_VERSION,
@@ -113,23 +142,31 @@ test('stale subscription indicators attach the toolbar popup', async () => {
       fetchedAt: Date.now() - SUBS_STALE_AFTER_MS - 1,
     },
   });
+  const colors = [];
   const popups = [];
+  const titles = [];
 
   await refreshSubscriptionIndicators({
     action: {
-      setBadgeBackgroundColor() {},
+      setBadgeBackgroundColor(options) {
+        colors.push(options);
+      },
       setPopup(options) {
         popups.push(options);
       },
-      setTitle() {},
+      setTitle(options) {
+        titles.push(options);
+      },
     },
     tabs: { query: async () => [] },
   });
 
+  assert.deepEqual(colors, [{ color: STALE_BADGE_COLOR }]);
   assert.deepEqual(popups, [{ popup: 'popup.html' }]);
+  assert.match(titles[0].title, /subscription list is 30 days old/i);
 });
 
-test('fresh subscription indicators clear the toolbar popup', async () => {
+test('fresh subscription indicators use normal color and clear the toolbar popup', async () => {
   await chrome.storage.local.set({
     subs: {
       format: SUBS_FORMAT_VERSION,
@@ -137,11 +174,14 @@ test('fresh subscription indicators clear the toolbar popup', async () => {
       fetchedAt: Date.now(),
     },
   });
+  const colors = [];
   const popups = [];
 
   await refreshSubscriptionIndicators({
     action: {
-      setBadgeBackgroundColor() {},
+      setBadgeBackgroundColor(options) {
+        colors.push(options);
+      },
       setPopup(options) {
         popups.push(options);
       },
@@ -150,6 +190,7 @@ test('fresh subscription indicators clear the toolbar popup', async () => {
     tabs: { query: async () => [] },
   });
 
+  assert.deepEqual(colors, [{ color: NORMAL_BADGE_COLOR }]);
   assert.deepEqual(popups, [{ popup: '' }]);
 });
 

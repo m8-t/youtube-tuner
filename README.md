@@ -81,9 +81,9 @@ subscription list").
 
 The toolbar badge shows the number of hidden videos on the page. Click the
 toolbar icon to set the filters to on or to off. When the subscription list
-is more than 30 days old, the badge becomes amber. Then a click on the icon
-opens a small panel. The panel has the same on/off control and a refresh
-button.
+is absent or more than 30 days old, the badge becomes amber. Then a click
+on the icon opens a small panel. The panel has the same on/off control and
+a refresh button.
 
 Use the options page to change the thresholds, the channel blocklist, the
 manual subscription entries, and the settings export and import.

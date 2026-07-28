@@ -161,10 +161,17 @@ export async function renderStatus(refreshResult = null) {
 
   el('subs-status').textContent = subscriptionStatus;
   const refreshPrompt = el('subs-refresh-prompt');
-  refreshPrompt.hidden = meta?.stale !== true;
-  refreshPrompt.textContent = meta?.stale === true
-    ? 'The subscription list is stale. Use “Refresh now” to update it.'
-    : '';
+  const needsNudge = meta === null || meta.stale === true;
+  refreshPrompt.hidden = !needsNudge;
+  if (meta === null) {
+    refreshPrompt.textContent =
+      'Subscription list not collected yet. Use \"Refresh now\" to collect it.';
+  } else if (meta.stale === true) {
+    refreshPrompt.textContent =
+      'The subscription list is stale. Use “Refresh now” to update it.';
+  } else {
+    refreshPrompt.textContent = '';
+  }
   el('watched-count').textContent = `${watched.size} videos remembered. `;
 }
 

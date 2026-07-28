@@ -4,7 +4,9 @@ import { loadSubsMeta } from './storage/subs.js';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function subscriptionAgeText(meta) {
-  if (meta === null) return 'Subscription list is unavailable.';
+  if (meta === null) {
+    return 'Subscription list not collected yet - click to collect.';
+  }
 
   const ageDays = Math.floor(Math.max(0, meta.ageMs) / DAY_MS);
   const dayLabel = ageDays === 1 ? 'day' : 'days';

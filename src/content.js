@@ -60,7 +60,7 @@ async function refreshState() {
     ]);
   state = {
     subs: unionSubs(fetchedSubs, manualSubs),
-    subsStale: subsMeta?.stale === true,
+    subsStale: subsMeta === null || subsMeta.stale === true,
     blocklist,
     watched,
     locale: detectLocale(document),

@@ -225,7 +225,7 @@ test('inactive count reports send zero without modifying the DOM', (t) => {
   assertCleanFilteringPage(doc);
 });
 
-test('count reports include the captured subscription staleness flag', (t) => {
+test('count reports include the captured subscription nudge flag', (t) => {
   const { lifecycle, messages } = setupFilteringLifecycle({
     pathname: '/',
     subsStale: true,

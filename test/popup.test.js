@@ -60,6 +60,22 @@ test('popup renders the stale subscription age in days', async () => {
   );
 });
 
+test('popup explains collection without an age when subscriptions are absent', async () => {
+  const dependencies = popupDependencies({
+    loadMeta: async () => null,
+  });
+
+  await initializePopup(dependencies);
+
+  const text =
+    dependencies.documentObject.getElementById('subs-age').textContent;
+  assert.equal(
+    text,
+    'Subscription list not collected yet - click to collect.',
+  );
+  assert.doesNotMatch(text, /\b\d+ days?\b/i);
+});
+
 test('popup reflects the current filtering value on open', async () => {
   const dependencies = popupDependencies({
     loadConfiguration: async () => ({ enabled: false }),

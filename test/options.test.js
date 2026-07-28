@@ -27,15 +27,17 @@ function settingsHarness() {
   };
 }
 
-async function renderStatusHarness(ageMs) {
+async function renderStatusHarness(ageMs = null) {
   const mock = installChromeMock({ install: false });
-  await mock.chrome.storage.local.set({
-    subs: {
-      format: SUBS_FORMAT_VERSION,
-      ids: ['Channel A'],
-      fetchedAt: Date.now() - ageMs,
-    },
-  });
+  if (ageMs !== null) {
+    await mock.chrome.storage.local.set({
+      subs: {
+        format: SUBS_FORMAT_VERSION,
+        ids: ['Channel A'],
+        fetchedAt: Date.now() - ageMs,
+      },
+    });
+  }
   const documentObject = html(`
     <p id="subs-status"></p>
     <p id="subs-refresh-prompt" hidden></p>
@@ -62,6 +64,20 @@ async function renderStatusHarness(ageMs) {
     }
   }
 }
+
+test('options prompts collection without an age when subscriptions are absent', async () => {
+  const rendered = await renderStatusHarness();
+
+  assert.equal(rendered.promptHidden, false);
+  assert.equal(
+    rendered.prompt,
+    'Subscription list not collected yet. Use \"Refresh now\" to collect it.',
+  );
+  assert.doesNotMatch(
+    `${rendered.status} ${rendered.prompt}`,
+    /\b\d+ days?\b/i,
+  );
+});
 
 test('options renders fresh subscription cache age without a refresh prompt', async () => {
   const rendered = await renderStatusHarness(2 * 24 * 60 * 60 * 1000);

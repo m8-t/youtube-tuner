@@ -166,7 +166,7 @@ export async function refreshSubs({ force = false } = {}) {
 
 export function subscriptionListTitle(meta) {
   if (meta === null) {
-    return 'youtube-tuner — subscription list unavailable, refresh recommended';
+    return 'youtube-tuner — subscription list not collected yet - click to collect';
   }
 
   const ageDays = Math.floor(Math.max(0, meta.ageMs) / DAY_MS);
@@ -203,13 +203,14 @@ export async function refreshSubscriptionIndicators({
   tabs = chrome.tabs,
 } = {}) {
   const meta = await loadSubsMeta();
-  const color = meta?.stale === true
+  const needsNudge = meta === null || meta.stale === true;
+  const color = needsNudge
     ? STALE_BADGE_COLOR
     : NORMAL_BADGE_COLOR;
   const title = subscriptionListTitle(meta);
   action.setBadgeBackgroundColor({ color });
   action.setTitle({ title });
-  updateSubscriptionPopup(meta?.stale === true, { action });
+  updateSubscriptionPopup(needsNudge, { action });
 
   try {
     const youtubeTabs = await tabs.query({ url: '*://www.youtube.com/*' });
