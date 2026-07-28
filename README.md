@@ -12,7 +12,7 @@ the pages you already have open.
 
 - **Permissions:** `storage`, `alarms`, and host access to `youtube.com` -
   nothing else.
-- **248 tests**, `node --test` + jsdom, no browser dependency.
+- **244 tests**, `node --test` + jsdom, no browser dependency.
 - **License:** AGPL-3.0.
 - **Language support: German YouTube UI only, for now.** Every
   string-dependent piece - the native menu items, the subscribe/unsubscribe
