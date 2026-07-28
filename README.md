@@ -55,8 +55,26 @@ the options page.
 
 ## Operation
 
-Configuration is not necessary. Open YouTube. The extension applies the
-filter rules.
+Do the first setup one time. Then open YouTube. The extension applies the
+filter rules. More configuration is not necessary.
+
+### First setup
+
+The extension must collect your subscription list one time. Without the
+list, rule 4 applies: the age rule and the view rule stay off, and only the
+seen-video rule and the blocklist operate.
+
+Do one of these two procedures:
+
+1. Open the options page. Click **Refresh now**. A new tab opens, scrolls
+   to the end of your subscriptions page, saves the list, and closes.
+2. As an alternative, open `youtube.com/feed/channels` and scroll to the
+   end of the page yourself. The extension saves the list when you get to
+   the end.
+
+The options page shows the state of the subscription list. After the first
+collection, the extension keeps the list current automatically (see "The
+subscription list").
 
 The toolbar badge shows the number of hidden videos on the page. Click the
 toolbar icon to set the filters to on or to off. When the subscription list
