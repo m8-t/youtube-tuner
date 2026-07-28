@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.zip
+
+# CRX signing key. Committing this leaks the identity behind the extension
+# ID and lets anyone publish updates that install over this extension.
+*.pem
+*.crx

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          set -e
+          npm ci
+
+      - name: Test
+        run: |
+          set -e
+          npm test
+
+      - name: Verify tag matches manifest version
+        run: |
+          set -e
+          VERSION=$(node -p "require('./manifest.json').version")
+          TAG=${GITHUB_REF#refs/tags/}
+          TAG_VERSION=${TAG#v}
+          if [ "$VERSION" != "$TAG_VERSION" ]; then
+            echo "Manifest version does not match release tag." >&2
+            exit 1
+          fi
+
+      - name: Configure CRX signing key
+        env:
+          YTT_CRX_KEY_PEM: ${{ secrets.YTT_CRX_KEY_PEM }}
+        run: |
+          set -e
+          umask 077
+          printf '%s' "$YTT_CRX_KEY_PEM" > "$RUNNER_TEMP/key.pem"
+          printf 'YTT_CRX_KEY=%s\n' "$RUNNER_TEMP/key.pem" >> "$GITHUB_ENV"
+
+      - name: Build signed CRX
+        run: |
+          set -e
+          npm run crx
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG=${GITHUB_REF#refs/tags/}
+          gh release create "$TAG" youtube-tuner-*.zip youtube-tuner-*.crx --title "Release $TAG" --generate-notes

@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>youtube-tuner</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; max-width: 42em; margin: 2em auto; padding: 0 1em; }
+      fieldset { border: 1px solid #ccc; border-radius: 6px; margin: 0 0 1.2em; padding: .8em 1em; }
+      legend { font-weight: 600; padding: 0 .4em; }
+      label { display: block; margin: .4em 0; }
+      input[type="number"] { width: 7em; }
+      textarea { box-sizing: border-box; min-height: 9em; width: 100%; }
+      ul { list-style: none; padding: 0; }
+      li { display: flex; justify-content: space-between; padding: .25em 0; border-bottom: 1px solid #eee; }
+      .status { color: #666; font-size: .9em; }
+      button { cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>youtube-tuner</h1>
+
+    <fieldset>
+      <legend>Master</legend>
+      <label><input type="checkbox" id="enabled"> Filtering enabled</label>
+      <p class="status" id="subs-status"></p>
+      <button id="subs-refresh" type="button">Refresh now</button>
+      <p class="status" id="subs-refresh-prompt" hidden></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Age</legend>
+      <label><input type="checkbox" id="age-enabled"> Hide videos older than
+        <input type="number" id="age-days" min="1" step="1"> days</label>
+      <p class="status">Subscribed channels are exempt. 1095 days = 3 years.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Views</legend>
+      <label><input type="checkbox" id="view-enabled"> Hide videos with fewer than
+        <input type="number" id="view-min" min="0" step="1"> views</label>
+      <label>Grace period for new uploads:
+        <input type="number" id="view-grace" min="0" step="1"> hours</label>
+      <p class="status">Subscribed channels are exempt.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Channels to always show</legend>
+      <form id="manual-subs-form">
+        <label for="manual-subs">Channels to always show (one per line). Combined with automatically fetched subscriptions.</label>
+        <textarea id="manual-subs" spellcheck="false"></textarea>
+        <button type="submit">Save channel list</button>
+        <span class="status" id="manual-subs-status"></span>
+      </form>
+    </fieldset>
+
+    <fieldset>
+      <legend>Watched</legend>
+      <label><input type="checkbox" id="watched-enabled"> Hide already-watched videos</label>
+      <p class="status">Applies to subscribed channels too.
+        <span id="watched-count"></span>
+        <button id="watched-clear" type="button">Clear history</button></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Blocked channels</legend>
+      <label><input type="checkbox" id="block-enabled"> Hide blocked channels</label>
+      <ul id="blocklist"></ul>
+      <p class="status" id="blocklist-empty">No channels blocked yet.
+        Hover a video and click the 🚫 button.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Backup and restore</legend>
+      <p>Export all collected data and settings, or replace them from a previous export.</p>
+      <button id="settings-export" type="button">Export settings</button>
+      <button id="settings-import" type="button">Import settings</button>
+      <input id="settings-file" type="file" accept="application/json,.json" hidden>
+      <span class="status" id="settings-status"></span>
+    </fieldset>
+
+    <script src="dist/options.js"></script>
+  </body>
+</html>

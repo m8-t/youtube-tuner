@@ -1,0 +1,385 @@
+import { test, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { installChromeMock } from './helpers/chrome-mock.js';
+
+const mock = installChromeMock();
+const {
+  COLLECT_TAB_URL,
+  NORMAL_BADGE_COLOR,
+  STALE_BADGE_COLOR,
+  SUBS_COLLECTION_RESULT_MESSAGE,
+  createSubscriptionTabCoordinator,
+  refreshSubscriptionIndicators,
+  refreshSubs,
+  updateCountsBadge,
+} = await import('../src/background.js');
+const {
+  SUBS_FORMAT_VERSION,
+  SUBS_STALE_AFTER_MS,
+} = await import('../src/storage/subs.js');
+
+beforeEach(async () => {
+  await chrome.storage.local.remove('subs');
+});
+
+function tabsHarness() {
+  const calls = {
+    create: [],
+    remove: [],
+    update: [],
+  };
+  let nextId = 40;
+  return {
+    calls,
+    tabs: {
+      async create(options) {
+        calls.create.push(options);
+        return { id: nextId++ };
+      },
+      async remove(tabId) {
+        calls.remove.push(tabId);
+      },
+      async update(tabId, options) {
+        calls.update.push([tabId, options]);
+        return { id: tabId };
+      },
+    },
+  };
+}
+
+test('background keeps the daily stale-cache alarm', () => {
+  assert.deepEqual(mock.alarmCreates, [
+    { name: 'refresh-subs', options: { periodInMinutes: 1440 } },
+  ]);
+});
+
+test('fresh subscription cache needs no foreground collection tab', async () => {
+  await chrome.storage.local.set({
+    subs: {
+      format: SUBS_FORMAT_VERSION,
+      ids: ['Channel A', 'Channel B'],
+      fetchedAt: Date.now(),
+    },
+  });
+
+  assert.equal(await refreshSubs(), 2);
+});
+
+test('stale count messages keep the hidden count and use the amber badge', () => {
+  const calls = { text: [], color: [] };
+  updateCountsBadge({ hidden: 12, subsStale: true }, 41, {
+    action: {
+      setBadgeText(options) {
+        calls.text.push(options);
+      },
+      setBadgeBackgroundColor(options) {
+        calls.color.push(options);
+      },
+    },
+  });
+
+  assert.deepEqual(calls.text, [{ tabId: 41, text: '12' }]);
+  assert.deepEqual(calls.color, [{
+    tabId: 41,
+    color: STALE_BADGE_COLOR,
+  }]);
+});
+
+test('fresh count messages keep the hidden count and use the normal badge', () => {
+  const calls = { text: [], color: [] };
+  updateCountsBadge({ hidden: 3, subsStale: false }, 42, {
+    action: {
+      setBadgeText(options) {
+        calls.text.push(options);
+      },
+      setBadgeBackgroundColor(options) {
+        calls.color.push(options);
+      },
+    },
+  });
+
+  assert.deepEqual(calls.text, [{ tabId: 42, text: '3' }]);
+  assert.deepEqual(calls.color, [{
+    tabId: 42,
+    color: NORMAL_BADGE_COLOR,
+  }]);
+});
+
+test('stale subscription indicators attach the toolbar popup', async () => {
+  await chrome.storage.local.set({
+    subs: {
+      format: SUBS_FORMAT_VERSION,
+      ids: ['Channel A'],
+      fetchedAt: Date.now() - SUBS_STALE_AFTER_MS - 1,
+    },
+  });
+  const popups = [];
+
+  await refreshSubscriptionIndicators({
+    action: {
+      setBadgeBackgroundColor() {},
+      setPopup(options) {
+        popups.push(options);
+      },
+      setTitle() {},
+    },
+    tabs: { query: async () => [] },
+  });
+
+  assert.deepEqual(popups, [{ popup: 'popup.html' }]);
+});
+
+test('fresh subscription indicators clear the toolbar popup', async () => {
+  await chrome.storage.local.set({
+    subs: {
+      format: SUBS_FORMAT_VERSION,
+      ids: ['Channel A'],
+      fetchedAt: Date.now(),
+    },
+  });
+  const popups = [];
+
+  await refreshSubscriptionIndicators({
+    action: {
+      setBadgeBackgroundColor() {},
+      setPopup(options) {
+        popups.push(options);
+      },
+      setTitle() {},
+    },
+    tabs: { query: async () => [] },
+  });
+
+  assert.deepEqual(popups, [{ popup: '' }]);
+});
+
+test('stale count messages attach the same toolbar popup', (t) => {
+  const popups = [];
+  const originalSetPopup = chrome.action.setPopup;
+  chrome.action.setPopup = (options) => popups.push(options);
+  t.after(() => {
+    chrome.action.setPopup = originalSetPopup;
+  });
+
+  mock.events.message[0]({
+    type: 'counts',
+    hidden: 4,
+    enabled: true,
+    subsStale: true,
+  }, { tab: { id: 43 } });
+
+  assert.deepEqual(popups, [{ popup: 'popup.html' }]);
+});
+
+test('fresh count messages clear the toolbar popup', (t) => {
+  const popups = [];
+  const originalSetPopup = chrome.action.setPopup;
+  chrome.action.setPopup = (options) => popups.push(options);
+  t.after(() => {
+    chrome.action.setPopup = originalSetPopup;
+  });
+
+  mock.events.message[0]({
+    type: 'counts',
+    hidden: 2,
+    enabled: true,
+    subsStale: false,
+  }, { tab: { id: 44 } });
+
+  assert.deepEqual(popups, [{ popup: '' }]);
+});
+
+test('fresh-cache toolbar clicks still toggle filtering', async () => {
+  await chrome.storage.local.set({
+    subs: {
+      format: SUBS_FORMAT_VERSION,
+      ids: ['Channel A'],
+      fetchedAt: Date.now(),
+    },
+  });
+  await chrome.storage.sync.set({ config: { enabled: true } });
+
+  await mock.events.clicked[0]();
+  const stored = await chrome.storage.sync.get('config');
+
+  assert.equal(stored.config.enabled, false);
+});
+
+test('daily alarm updates badge and tooltip without opening a tab', async (t) => {
+  const now = Date.now();
+  await chrome.storage.local.set({
+    subs: {
+      format: SUBS_FORMAT_VERSION,
+      ids: ['Channel A'],
+      fetchedAt: now - SUBS_STALE_AFTER_MS - 24 * 60 * 60 * 1000,
+    },
+  });
+
+  const colors = [];
+  const titles = [];
+  let tabCreates = 0;
+  const originalColor = chrome.action.setBadgeBackgroundColor;
+  const originalTitle = chrome.action.setTitle;
+  const originalCreate = chrome.tabs.create;
+  chrome.action.setBadgeBackgroundColor = (options) => colors.push(options);
+  chrome.action.setTitle = (options) => titles.push(options);
+  chrome.tabs.create = async () => {
+    tabCreates += 1;
+    return { id: 99 };
+  };
+  t.after(() => {
+    chrome.action.setBadgeBackgroundColor = originalColor;
+    chrome.action.setTitle = originalTitle;
+    chrome.tabs.create = originalCreate;
+  });
+
+  await mock.events.alarm[0]({ name: 'refresh-subs' });
+
+  const staleAgeDays =
+    SUBS_STALE_AFTER_MS / (24 * 60 * 60 * 1000) + 1;
+  assert.deepEqual(colors, [{ color: STALE_BADGE_COLOR }]);
+  assert.match(
+    titles[0].title,
+    new RegExp(`subscription list is ${staleAgeDays} days old`, 'i'),
+  );
+  assert.match(titles[0].title, /refresh recommended/i);
+  assert.equal(tabCreates, 0);
+});
+
+test('manual refresh creates one active marked collection tab', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+
+  await coordinator.begin(() => {});
+
+  assert.deepEqual(harness.calls.create, [{
+    url: COLLECT_TAB_URL,
+    active: true,
+  }]);
+  assert.equal(coordinator.getCollectTabId(), 40);
+});
+
+test('a second refresh focuses the existing collection tab', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+
+  await coordinator.begin(() => {});
+  await coordinator.begin(() => {});
+
+  assert.equal(harness.calls.create.length, 1);
+  assert.deepEqual(harness.calls.update, [[40, { active: true }]]);
+});
+
+test('failed foreground collection propagates diagnostics and closes its tab', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+  const responses = [];
+  const diagnostics = {
+    finalNameCount: 98,
+    initialNameCount: 98,
+    bottomReached: false,
+    elapsedMs: 90_000,
+    scrollAttempts: 12,
+    continuationPresent: true,
+  };
+
+  await coordinator.begin((response) => responses.push(response));
+  assert.equal(await coordinator.receiveResult({
+    type: SUBS_COLLECTION_RESULT_MESSAGE,
+    complete: false,
+    count: 98,
+    reason: 'budget-expired',
+    diagnostics,
+  }, { tab: { id: 40 } }), true);
+
+  assert.deepEqual(responses, [{
+    complete: false,
+    reason: 'budget-expired',
+    diagnostics,
+  }]);
+  assert.deepEqual(harness.calls.remove, [40]);
+  assert.equal(coordinator.getCollectTabId(), null);
+});
+
+test('successful foreground collection returns its count and closes its tab', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+  const responses = [];
+
+  await coordinator.begin((response) => responses.push(response));
+  await coordinator.receiveResult({
+    type: SUBS_COLLECTION_RESULT_MESSAGE,
+    complete: true,
+    count: 120,
+  }, { tab: { id: 40 } });
+
+  assert.deepEqual(responses, [{ complete: true, count: 120 }]);
+  assert.deepEqual(harness.calls.remove, [40]);
+});
+
+test('closing the collection tab reports collect-tab-closed to every waiter', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+  const first = [];
+  const second = [];
+
+  await coordinator.begin((response) => first.push(response));
+  await coordinator.begin((response) => second.push(response));
+  assert.equal(coordinator.tabRemoved(40), true);
+  await Promise.resolve();
+
+  assert.deepEqual(first, [{
+    complete: false,
+    reason: 'collect-tab-closed',
+  }]);
+  assert.deepEqual(second, [{
+    complete: false,
+    reason: 'collect-tab-closed',
+  }]);
+  assert.deepEqual(harness.calls.remove, []);
+  assert.equal(coordinator.getCollectTabId(), null);
+});
+
+test('options timeout cancellation closes and clears the collection tab', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+  const responses = [];
+
+  await coordinator.begin((response) => responses.push(response));
+  assert.equal(await coordinator.cancel(), true);
+
+  assert.deepEqual(responses, [{ complete: false, reason: 'timeout' }]);
+  assert.deepEqual(harness.calls.remove, [40]);
+  assert.equal(coordinator.getCollectTabId(), null);
+});
+
+test('collection results from any other tab are ignored', async () => {
+  const harness = tabsHarness();
+  const coordinator = createSubscriptionTabCoordinator({
+    tabs: harness.tabs,
+  });
+  const responses = [];
+
+  await coordinator.begin((response) => responses.push(response));
+  assert.equal(await coordinator.receiveResult({
+    type: SUBS_COLLECTION_RESULT_MESSAGE,
+    complete: true,
+    count: 5,
+  }, { tab: { id: 99 } }), false);
+
+  assert.deepEqual(responses, []);
+  assert.deepEqual(harness.calls.remove, []);
+  assert.equal(coordinator.getCollectTabId(), 40);
+});
