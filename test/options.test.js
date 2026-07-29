@@ -5,9 +5,11 @@ import {
   exportSettings,
   importSettings,
   MANUAL_REFRESH_TIMEOUT_MS,
+  renderOverrides,
   renderStatus,
   refreshFailureMessage,
   runManualSubscriptionRefresh,
+  setupOverridesEditor,
 } from '../src/options.js';
 import { SUBS_SCRAPE_BUDGET_MS } from '../src/subs-refresh.js';
 import {
@@ -34,6 +36,14 @@ test('options page has no update-check controls', () => {
   assert.doesNotMatch(markup, /update-check-enabled/);
   assert.doesNotMatch(markup, /check-update/);
   assert.doesNotMatch(markup, /update-status/);
+});
+
+test('options page includes the channel rules editor', () => {
+  const markup = readFileSync('options.html', 'utf8');
+
+  assert.match(markup, /<legend>Channel rules<\/legend>/);
+  assert.match(markup, /id="override-rows"/);
+  assert.match(markup, /id="override-add"/);
 });
 
 async function renderStatusHarness(ageMs = null) {
@@ -117,7 +127,12 @@ test('settings export includes complete local and sync storage areas', async () 
     subs: { format: 2, ids: ['Channel A'], fetchedAt: 123 },
     watched: ['video-1'],
   });
-  await harness.syncStorage.set({ config: { enabled: false } });
+  await harness.syncStorage.set({
+    config: { enabled: false },
+    channelOverrides: {
+      'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
+    },
+  });
   let exportedBlob;
   let revokedUrl;
   let clicked = false;
@@ -153,7 +168,12 @@ test('settings export includes complete local and sync storage areas', async () 
       subs: { format: 2, ids: ['Channel A'], fetchedAt: 123 },
       watched: ['video-1'],
     },
-    sync: { config: { enabled: false } },
+    sync: {
+      config: { enabled: false },
+      channelOverrides: {
+        'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
+      },
+    },
   });
   assert.deepEqual(JSON.parse(await exportedBlob.text()), settings);
   assert.equal(anchor.download, 'youtube-tuner-settings-2026-07-28.json');
@@ -203,7 +223,13 @@ test('valid settings import replaces both areas and reports imported counts', as
       watched,
       manualSubs: ['Manual Channel'],
     },
-    sync: { config: { enabled: false } },
+    sync: {
+      config: { enabled: false },
+      channelOverrides: {
+        'Channel A': { watched: { enabled: false } },
+        'Channel B': { view: { enabled: true, minViews: 1000 } },
+      },
+    },
   };
   let confirmationText;
   let rendered = false;
@@ -227,9 +253,133 @@ test('valid settings import replaces both areas and reports imported counts', as
   assert.equal(rendered, true);
   assert.equal(
     harness.statusElement.textContent,
-    'Imported 330 subscriptions, 12 blocked channels, 1843 watched videos.',
+    'Imported 330 subscriptions, 12 blocked channels, 1843 watched videos, 2 channel overrides.',
   );
   assert.equal(harness.button.disabled, false);
+});
+
+function overridesHarness() {
+  const mock = installChromeMock({ install: false });
+  const documentObject = html(`
+    <table><tbody id="override-rows"></tbody></table>
+    <button id="override-add" type="button">Add channel</button>
+  `);
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  globalThis.chrome = mock.chrome;
+  globalThis.document = documentObject;
+  return {
+    documentObject,
+    mock,
+    restore() {
+      globalThis.chrome = previousChrome;
+      if (previousDocument === undefined) {
+        delete globalThis.document;
+      } else {
+        globalThis.document = previousDocument;
+      }
+    },
+  };
+}
+
+function change(element) {
+  element.dispatchEvent(new element.ownerDocument.defaultView.Event(
+    'change',
+    { bubbles: true },
+  ));
+}
+
+const settleChanges = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('channel rules render existing overrides', async (t) => {
+  const harness = overridesHarness();
+  t.after(harness.restore);
+  await harness.mock.chrome.storage.sync.set({
+    channelOverrides: {
+      'Channel A': {
+        watched: { enabled: false },
+        age: { enabled: true, maxAgeDays: 365 },
+        view: { enabled: false },
+      },
+    },
+  });
+
+  await renderOverrides();
+
+  const row = harness.documentObject.querySelector('#override-rows tr');
+  assert.equal(row.querySelector('.override-channel').value, 'Channel A');
+  assert.equal(row.querySelector('.override-watched').checked, false);
+  assert.equal(row.querySelector('.override-age-mode').value, 'custom');
+  assert.equal(row.querySelector('.override-age-limit').valueAsNumber, 365);
+  assert.equal(row.querySelector('.override-view-mode').value, 'off');
+  assert.equal(row.querySelector('.override-view-limit-row').hidden, true);
+});
+
+test('channel rules add and edit rows persist normalized overrides', async (t) => {
+  const harness = overridesHarness();
+  t.after(harness.restore);
+  await setupOverridesEditor();
+
+  harness.documentObject.getElementById('override-add').click();
+  let row = harness.documentObject.querySelector('#override-rows tr');
+  const channel = row.querySelector('.override-channel');
+  channel.value = '  Channel A  ';
+  row.querySelector('.override-watched').checked = false;
+  row.querySelector('.override-age-mode').value = 'custom';
+  row.querySelector('.override-age-limit').value = '90';
+  change(channel);
+  await settleChanges();
+
+  assert.deepEqual(harness.mock.areas.sync.channelOverrides, {
+    'Channel A': {
+      watched: { enabled: false },
+      age: { enabled: true, maxAgeDays: 90 },
+    },
+  });
+
+  row = harness.documentObject.querySelector('#override-rows tr');
+  row.querySelector('.override-view-mode').value = 'custom';
+  row.querySelector('.override-view-limit').value = '2500';
+  change(row.querySelector('.override-view-limit'));
+  await settleChanges();
+
+  assert.deepEqual(harness.mock.areas.sync.channelOverrides['Channel A'].view, {
+    enabled: true,
+    minViews: 2500,
+  });
+});
+
+test('channel rules remove rows and ignore garbage number input', async (t) => {
+  const harness = overridesHarness();
+  t.after(harness.restore);
+  await harness.mock.chrome.storage.sync.set({
+    channelOverrides: {
+      'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
+      'Channel B': { view: { enabled: true, minViews: 1000 } },
+    },
+  });
+  await setupOverridesEditor();
+
+  let rows = harness.documentObject.querySelectorAll('#override-rows tr');
+  const channelARow = [...rows].find((row) =>
+    row.querySelector('.override-channel').value === 'Channel A');
+  channelARow.querySelector('.override-age-limit').value = '1.5';
+  change(channelARow.querySelector('.override-age-limit'));
+  await settleChanges();
+
+  assert.deepEqual(harness.mock.areas.sync.channelOverrides['Channel A'], {
+    age: { enabled: true, maxAgeDays: 30 },
+  });
+
+  rows = harness.documentObject.querySelectorAll('#override-rows tr');
+  const channelBRow = [...rows].find((row) =>
+    row.querySelector('.override-channel').value === 'Channel B');
+  channelBRow.querySelector('.override-remove').click();
+  await settleChanges();
+
+  assert.deepEqual(harness.mock.areas.sync.channelOverrides, {
+    'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
+  });
 });
 
 test('malformed settings JSON leaves storage untouched', async () => {

@@ -14,6 +14,7 @@ import { createStarvationNudge } from './dom/starvation.js';
 import { loadConfig, onConfigChange } from './storage/config.js';
 import { loadWatched, addWatched } from './storage/watched.js';
 import { loadBlocklist, addBlocked } from './storage/blocklist.js';
+import { loadOverrides } from './storage/overrides.js';
 import {
   addSubNames,
   loadSubs,
@@ -39,6 +40,7 @@ let state = {
   subsStale: false,
   blocklist: new Set(),
   watched: new Set(),
+  overrides: new Map(),
   locale: null,
 };
 let nudge;
@@ -50,22 +52,35 @@ export function isSupportedRoute(pathname) {
 }
 
 async function refreshState() {
-  const [fetchedSubs, subsMeta, manualSubs, blocklist, watched] =
+  const [fetchedSubs, subsMeta, manualSubs, blocklist, watched, overrides] =
     await Promise.all([
       loadSubs(),
       loadSubsMeta(),
       loadManualSubs(),
       loadBlocklist(),
       loadWatched(),
+      loadOverrides(),
     ]);
   state = {
     subs: unionSubs(fetchedSubs, manualSubs),
     subsStale: subsMeta === null || subsMeta.stale === true,
     blocklist,
     watched,
+    overrides,
     locale: detectLocale(document),
   };
   return fetchedSubs;
+}
+
+export function hasStateStorageChange(changes, area) {
+  if (area === 'sync') return Boolean(changes.channelOverrides);
+  if (area !== 'local') return false;
+  return Boolean(
+    changes.blocklist ||
+    changes.subs ||
+    changes.manualSubs ||
+    changes.watched,
+  );
 }
 
 // Record every video the user actually opens. YouTube's resume-playback
@@ -374,11 +389,9 @@ async function main({
   });
 
   chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area !== 'local') return;
-    if (changes.blocklist || changes.subs || changes.manualSubs || changes.watched) {
-      await refreshState();
-      filtering.scan();
-    }
+    if (!hasStateStorageChange(changes, area)) return;
+    await refreshState();
+    filtering.scan();
   });
 
   chrome.runtime.onMessage.addListener((message) => {

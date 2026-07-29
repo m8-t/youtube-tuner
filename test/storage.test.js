@@ -9,6 +9,8 @@ const { loadWatched, addWatched, clearWatched, WATCHED_CAP } =
   await import('../src/storage/watched.js');
 const { loadBlocklist, addBlocked, removeBlocked } =
   await import('../src/storage/blocklist.js');
+const { loadOverrides, saveOverrides } =
+  await import('../src/storage/overrides.js');
 const {
   loadSubs,
   loadSubsMeta,
@@ -382,4 +384,95 @@ test('loadSubsMeta changes stale at SUBS_STALE_AFTER_MS', async (t) => {
     ageMs: SUBS_STALE_AFTER_MS + 1,
     stale: true,
   });
+});
+
+test('overrides load normalized valid entries and drop garbage', async () => {
+  await chrome.storage.sync.set({
+    channelOverrides: {
+      '  Channel A  \nIgnored': {
+        watched: { enabled: false, garbage: true },
+        age: { enabled: true, maxAgeDays: 365, garbage: 'ignored' },
+        view: { enabled: 'yes', minViews: 1000 },
+        garbage: true,
+      },
+      'Channel B': {
+        watched: { enabled: true },
+        age: { enabled: false, maxAgeDays: Number.POSITIVE_INFINITY },
+        view: 'invalid',
+      },
+      'Garbage Channel': {
+        age: { enabled: 'yes', maxAgeDays: 0 },
+        view: { minViews: 1.5 },
+      },
+      'Invalid Entry': null,
+    },
+  });
+
+  assert.deepEqual(await loadOverrides(), new Map([
+    ['Channel A', {
+      watched: { enabled: false },
+      age: { enabled: true, maxAgeDays: 365 },
+      view: { minViews: 1000 },
+    }],
+    ['Channel B', {
+      watched: { enabled: true },
+      age: { enabled: false },
+    }],
+  ]));
+});
+
+test('overrides fail closed for malformed storage and storage errors', async (t) => {
+  await chrome.storage.sync.set({ channelOverrides: ['not', 'an', 'object'] });
+  assert.deepEqual(await loadOverrides(), new Map());
+
+  const originalGet = chrome.storage.sync.get;
+  chrome.storage.sync.get = async () => {
+    throw new Error('storage unavailable');
+  };
+  t.after(() => {
+    chrome.storage.sync.get = originalGet;
+  });
+  assert.deepEqual(await loadOverrides(), new Map());
+});
+
+test('overrides save to sync with normalized keys and empty entries removed', async () => {
+  await saveOverrides(new Map([
+    ['  Channel A \nIgnored', {
+      watched: { enabled: false },
+      age: { enabled: true, maxAgeDays: 90.5 },
+      view: { minViews: 2500, garbage: true },
+    }],
+    ['Empty Channel', {}],
+    ['', { age: { enabled: true } }],
+    ['Channel B', {
+      age: { enabled: 'yes', maxAgeDays: 30 },
+      view: { enabled: false, minViews: -10 },
+    }],
+  ]));
+
+  assert.deepEqual(mock.areas.sync.channelOverrides, {
+    'Channel A': {
+      watched: { enabled: false },
+      age: { enabled: true },
+      view: { minViews: 2500 },
+    },
+    'Channel B': {
+      age: { maxAgeDays: 30 },
+      view: { enabled: false },
+    },
+  });
+  assert.equal('channelOverrides' in mock.areas.local, false);
+});
+
+test('overrides round-trip every supported field', async () => {
+  const overrides = {
+    'Channel A': {
+      watched: { enabled: false },
+      age: { enabled: true, maxAgeDays: 365 },
+      view: { enabled: false, minViews: 1000 },
+    },
+  };
+
+  await saveOverrides(overrides);
+  assert.deepEqual(await loadOverrides(), new Map(Object.entries(overrides)));
 });

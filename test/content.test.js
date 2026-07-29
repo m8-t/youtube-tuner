@@ -4,6 +4,7 @@ import { html } from './helpers/dom.js';
 import {
   SUBS_COLLECTION_RESULT_MESSAGE,
   createFilteringLifecycle,
+  hasStateStorageChange,
   isSupportedRoute,
   startContentScript,
   startSubscriptionCollectionMode,
@@ -91,6 +92,19 @@ test('filtering routes are exactly the home feed and watch page', () => {
   ]) {
     assert.equal(isSupportedRoute(pathname), false, pathname);
   }
+});
+
+test('content state refreshes for local state and sync channel overrides', () => {
+  assert.equal(hasStateStorageChange({ watched: {} }, 'local'), true);
+  assert.equal(
+    hasStateStorageChange({ channelOverrides: {} }, 'sync'),
+    true,
+  );
+  assert.equal(hasStateStorageChange({ config: {} }, 'sync'), false);
+  assert.equal(
+    hasStateStorageChange({ channelOverrides: {} }, 'local'),
+    false,
+  );
 });
 
 test('navigating from home to results tears down every content artifact', (t) => {

@@ -139,3 +139,112 @@ test('individually disabled rules do not fire', () => {
   const t = tile({ ageText: '9 years ago' });
   assert.deepEqual(decide(t, config, state()), { hide: false, reason: 'shown' });
 });
+
+test('a channel override can skip the watched rule', () => {
+  const s = state({
+    watched: new Set(['abc123']),
+    overrides: new Map([
+      ['Some Channel', { watched: { enabled: false } }],
+    ]),
+  });
+  assert.deepEqual(decide(tile(), DEFAULT_CONFIG, s), {
+    hide: false, reason: 'shown',
+  });
+});
+
+test('a subscribed channel can be hidden by a forced age rule', () => {
+  const s = state({
+    subs: new Set(['Some Channel']),
+    overrides: new Map([
+      ['Some Channel', { age: { enabled: true, maxAgeDays: 30 } }],
+    ]),
+  });
+  const t = tile({ ageText: '2 years ago' });
+  assert.deepEqual(decide(t, DEFAULT_CONFIG, s), {
+    hide: true, reason: 'age-override',
+  });
+});
+
+test('an explicitly enabled view rule runs when subscriptions are unavailable', () => {
+  const s = state({
+    subs: null,
+    overrides: new Map([
+      ['Some Channel', { view: { enabled: true, minViews: 1000 } }],
+    ]),
+  });
+  const t = tile({ ageText: '5 days ago', viewText: '40 views' });
+  assert.deepEqual(decide(t, DEFAULT_CONFIG, s), {
+    hide: true, reason: 'views-override',
+  });
+});
+
+test('a per-channel age threshold replaces the global threshold', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    ageRule: { enabled: true, maxAgeDays: 1 },
+  };
+  const s = state({
+    overrides: {
+      'Some Channel': { age: { maxAgeDays: 365 } },
+    },
+  });
+  assert.deepEqual(decide(tile(), config, s), {
+    hide: false, reason: 'shown',
+  });
+});
+
+test('an explicitly disabled age rule skips a globally enabled rule', () => {
+  const s = state({
+    overrides: new Map([
+      ['Some Channel', { age: { enabled: false } }],
+    ]),
+  });
+  const t = tile({ ageText: '9 years ago' });
+  assert.deepEqual(decide(t, DEFAULT_CONFIG, s), {
+    hide: false, reason: 'shown',
+  });
+});
+
+test('an explicitly disabled view rule skips a globally enabled rule', () => {
+  const s = state({
+    overrides: new Map([
+      ['Some Channel', { view: { enabled: false } }],
+    ]),
+  });
+  const t = tile({ ageText: '5 days ago', viewText: '40 views' });
+  assert.deepEqual(decide(t, DEFAULT_CONFIG, s), {
+    hide: false, reason: 'shown',
+  });
+});
+
+test('a forced age rule runs when the global age rule is disabled', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    ageRule: { ...DEFAULT_CONFIG.ageRule, enabled: false },
+  };
+  const s = state({
+    overrides: new Map([
+      ['Some Channel', { age: { enabled: true, maxAgeDays: 30 } }],
+    ]),
+  });
+  const t = tile({ ageText: '2 years ago' });
+  assert.deepEqual(decide(t, config, s), {
+    hide: true, reason: 'age-override',
+  });
+});
+
+test('blocklist remains ahead of every channel override', () => {
+  const s = state({
+    blocklist: new Set(['Some Channel']),
+    overrides: new Map([
+      ['Some Channel', {
+        watched: { enabled: false },
+        age: { enabled: false },
+        view: { enabled: false },
+      }],
+    ]),
+  });
+  assert.deepEqual(decide(tile(), DEFAULT_CONFIG, s), {
+    hide: true, reason: 'blocked',
+  });
+});

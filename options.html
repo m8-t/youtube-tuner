@@ -9,7 +9,13 @@
       legend { font-weight: 600; padding: 0 .4em; }
       label { display: block; margin: .4em 0; }
       input[type="number"] { width: 7em; }
+      input[type="text"] { box-sizing: border-box; width: 100%; }
       textarea { box-sizing: border-box; min-height: 9em; width: 100%; }
+      table { border-collapse: collapse; margin: .6em 0; width: 100%; }
+      th, td { border-bottom: 1px solid #eee; padding: .4em; text-align: left; vertical-align: top; }
+      th { font-weight: 600; }
+      td label { margin: 0; }
+      .override-limit { display: block; margin-top: .25em; }
       ul { list-style: none; padding: 0; }
       li { display: flex; justify-content: space-between; padding: .25em 0; border-bottom: 1px solid #eee; }
       .status { color: #666; font-size: .9em; }
@@ -59,6 +65,24 @@
       <p class="status">Applies to subscribed channels too.
         <span id="watched-count"></span>
         <button id="watched-clear" type="button">Clear history</button></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Channel rules</legend>
+      <p class="status">Override filtering rules for individual channels.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th>Watched</th>
+            <th>Age</th>
+            <th>Views</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="override-rows"></tbody>
+      </table>
+      <button id="override-add" type="button">Add channel</button>
     </fieldset>
 
     <fieldset>

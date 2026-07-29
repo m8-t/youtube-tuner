@@ -174,6 +174,24 @@ The first applicable rule gives the result.
 
 The default limits are 1095 days, 5000 views, and a 48-hour grace period.
 
+### Channel rules
+
+The options page has a "Channel rules" table for per-channel exceptions. For
+each channel you can:
+
+- Turn the watched rule off.
+- Set the age rule to off, or to a custom day limit.
+- Set the view rule to off, or to a custom view limit.
+
+A rule with no override entry uses the global settings. An explicit
+per-channel rule is stronger than the general behavior: it also applies to
+your subscribed channels, and it stays active when the subscription list is
+absent. The blocklist has no per-channel override; remove the channel from
+the blocklist instead.
+
+The channel rules use the channel display name, the same key as the
+blocklist. The rules are part of the synchronized settings.
+
 ### Tile controls
 
 Each readable video tile has a **Not interested** control. This control tries
@@ -226,6 +244,7 @@ blocklist rule can still hide the video.
 | Blocked channel names | `local` |
 | Watched video IDs | `local` |
 | Subscription cache and collection times | `local` |
+| Per-channel rule overrides | `sync` |
 | Update check time and newest release tag | `local` |
 
 The watched set contains a maximum of 5000 video IDs. If a new ID exceeds this
@@ -257,7 +276,7 @@ src/
     native-menu.js    operates YouTube's own menu, fail-closed
     styles.js  empty-sections.js  starvation.js
   locale/             age and view parsing, EN and DE
-  storage/            config (sync); blocklist, watched, subs (local)
+  storage/            config + overrides (sync); blocklist, watched, subs (local)
   subs-refresh.js     subscription collection loop
   subs-scrape.js      channel-name extraction from the page
   subs-capture.js     subscribe, unsubscribe, and reconcile on /watch
