@@ -98,9 +98,14 @@ page. The extension does not download or install the release. The toolbar
 menu has a **Check for updates** button for a manual check and a switch that
 turns the daily check off.
 
-The browser connects stored data to the extension ID. Export your settings
-before you change the installation method. If you remove the extension, the
-browser deletes its stored data. An update keeps the data.
+The browser connects stored data to the extension ID. If you remove the
+extension, the browser deletes its stored data: the settings, the blocklist,
+the watched history, and the subscription list. An update keeps the data.
+
+The options page has an **Export settings** and an **Import settings**
+function for this case. Before you remove the extension or change the
+installation method, export your settings to a JSON file. After the new
+installation, import the file. The import restores all stored data.
 
 After each installation or update, reload the open YouTube tabs. The
 extension does not attach to tabs that were open before.
