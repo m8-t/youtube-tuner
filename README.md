@@ -1,174 +1,177 @@
 # youtube-tuner
 
-youtube-tuner removes unwanted videos from the YouTube home feed and from
-the watch-page sidebar. It hides videos that are old, seen before, or low in
-views, and videos from blocked channels. It does not hide videos from your
-subscribed channels.
+youtube-tuner is a Manifest V3 extension for Chromium browsers. It filters
+video tiles in the YouTube home feed and in the watch-page sidebar.
 
-The extension operates only in your browser. It does not send data. It does
-not connect to external services. It reads only the YouTube pages that are
-open.
+The extension can hide a video for these reasons:
 
-- **Permissions:** `storage`, `alarms`, and access to `youtube.com`. No
-  other permissions.
-- **Tests:** 257 tests with `node --test` and jsdom. A browser is not
-  necessary for the tests.
-- **License:** AGPL-3.0.
-- **Writing standard:** This README uses
-  [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/).
-  The simple sentences are intentional.
-- **Language support:** The extension is verified with the German YouTube
-  interface only. The English interface has code but is not tested. Other
-  languages are not supported. On an unsupported language, the extension is
-  safe: it does not click, it does not write, and all videos stay visible.
+- The channel is on your local blocklist.
+- You opened the video before, or the tile has a resume bar.
+- The video is older than your age limit.
+- The video has too few views after a grace period.
 
----
+A known subscription list protects subscribed channels from the age rule and
+the view rule. It does not protect them from the blocklist rule or the watched
+rule.
 
-## Installation
+This README uses [ASD-STE100 Simplified Technical
+English](https://www.asd-ste100.org/). The simple sentences are intentional.
 
-Download the applicable file from the [releases page](../../releases). Each
-release has two files.
+## Install
 
-### ZIP file (all Chromium browsers)
+Download the files from the [releases page](../../releases).
+
+### Install the ZIP file
+
+Use this procedure in a Chromium browser that can load unpacked extensions.
 
 1. Download `youtube-tuner-<version>.zip`.
-2. Extract the file to a permanent folder.
-3. Open `chrome://extensions`. Set **Developer mode** to on.
-4. Click **Load unpacked**.
-5. Select the folder.
+2. Extract the ZIP file to a permanent directory.
+3. Open `chrome://extensions`.
+4. Enable **Developer mode**.
+5. Select **Load unpacked**.
+6. Select the extracted directory.
 
-### CRX file (Helium, ungoogled-chromium)
+### Install the CRX file
 
-1. Click the `youtube-tuner-<version>.crx` link with the right mouse
-   button. Select **Save Link As** and save the file.
-2. Drag the saved file to the `chrome://extensions` page and release it
-   there.
+Use this procedure only if your browser permits external CRX files. Helium and
+ungoogled-chromium support this method.
 
-Do not click the CRX link directly. A direct click makes the browser try
-an immediate installation, and this fails with the error
-`CRX_REQUIRED_PROOF_MISSING`. An alternative to step 1: set
-`chrome://flags/#extension-mime-request-handling` to "Always prompt for
-install"; then a direct click installs the file.
+1. Save `youtube-tuner-<version>.crx` to your computer.
+2. Open `chrome://extensions`.
+3. Drag the CRX file to the page.
 
-Google Chrome does not accept CRX files from sources other than the Chrome
-Web Store. For Google Chrome, use the ZIP procedure.
+If a direct download causes `CRX_REQUIRED_PROOF_MISSING`, use one of these
+procedures:
 
-The CRX file has a signature from one permanent key. Thus the extension ID
-stays the same in each version, and your settings stay after an update.
-There is no automatic update. To install a new version, download the new
-file and do the installation again.
+- Click the link with the right mouse button and select **Save Link As**.
+  Then use the drag procedure.
+- Set `chrome://flags/#extension-mime-request-handling` to "Always prompt for
+  install". Then a direct click installs the file.
 
-The browser connects the stored settings to the extension ID. To move
-settings to a different installation, use the export and import functions on
-the options page.
+If the browser rejects the CRX file, use the ZIP procedure.
 
----
+The project uses one permanent signing key for all CRX releases. The same key
+gives each CRX release the same extension ID. The extension has no automatic
+update service. Install each new release manually.
 
-## Operation
+The browser connects stored data to the extension ID. Export your settings
+before you change the installation method.
 
-Do the first setup one time. Then open YouTube. The extension applies the
-filter rules. More configuration is not necessary.
+## Configure
 
-### First setup
+### Collect your subscriptions
 
-The extension must collect your subscription list one time. Without the
-list, rule 4 applies: the age rule and the view rule stay off, and only the
-seen-video rule and the blocklist operate.
+The extension needs your subscription list before it can safely use the age
+rule and the view rule. Use this procedure:
 
-Do one of these two procedures:
+1. Open the extension options page.
+2. Select **Refresh now**.
+3. Confirm the operation.
 
-1. Open the options page. Click **Refresh now**. A new tab opens, scrolls
-   to the end of your subscriptions page, saves the list, and closes.
-2. As an alternative, open `youtube.com/feed/channels` and scroll to the
-   end of the page yourself. The extension saves the list when you get to
-   the end.
+The extension opens your YouTube channels page in a foreground tab. It scrolls
+to the end, saves the complete list, and closes the tab.
 
-The options page shows the state of the subscription list. After the first
-collection, the extension keeps the list current automatically (see "The
-subscription list").
+Alternatively, open `youtube.com/feed/channels` and scroll to the end yourself.
+The extension monitors this page when the list is absent or stale. It does not
+scroll during this passive collection.
 
-The toolbar badge shows the number of hidden videos on the page. Click the
-toolbar icon to set the filters to on or to off. When the subscription list
-is absent or more than 30 days old, the badge becomes amber. Then a click
-on the icon opens a small panel. The panel has the same on/off control and
-a refresh button.
+If no fetched or manual subscription list exists, the age rule and the view
+rule do not operate. The watched rule and the blocklist rule still operate.
 
-Use the options page to change the thresholds, the channel blocklist, the
-manual subscription entries, and the settings export and import.
+After a full collection, the extension updates the stored list in these ways:
 
-### Filter rules
+- A subscribe action on a watch page adds the channel.
+- An unsubscribe action removes the channel after two matching checks.
+- Two matching checks on a watch page can correct a change from another
+  device.
+- A passive collection can replace an absent or stale list when you scroll to
+  the end of `youtube.com/feed/channels`.
 
-The rules apply in this sequence. The first applicable rule wins.
+The watch-page updates operate only while filtering is on. They also require a
+usable fetched subscription list.
 
-| # | Condition | Result |
-|---|-----------|--------|
-| 1 | the extension is off | show |
-| 2 | the channel is on the local blocklist | **hide** |
-| 3 | the video is seen (resume bar, or in the watched set) | **hide** |
-| 4 | the subscription list is not available | show (rules 6 and 7 stop) |
-| 5 | the channel is a subscribed channel | show |
-| 6 | the video is older than `maxAgeDays` | **hide** |
-| 7 | the views are less than `minViews` after the grace time | **hide** |
-| 8 | none of the conditions above | show |
+A full list becomes stale after 30 days. A stale list remains in use. The
+extension saves a full collection only when the list is nonempty, stable, and
+complete. If collection fails, it keeps the last good full list.
 
-Default values (`src/rules/defaults.js`): 1095 days, 5000 views, 48 hours
-of grace time for new uploads.
+### Filter order
 
-Rule 4 is intentional. Without the subscription list, the extension cannot
-know your subscribed channels. Then it is safer to show all videos than to
-hide videos from a subscribed channel.
+The toolbar badge shows the number of hidden videos. An amber badge means that
+the subscription list is absent or stale. In this case, the toolbar icon opens
+a panel with the filter switch and the refresh control. With a current list,
+the icon turns filtering on or off.
 
-The extension filters only the home feed (`/`) and the watch page
-(`/watch`). It does not change other pages. The toolbar control stops the
-filters immediately. A page reload is not necessary.
+Use the options page to set the limits, edit channel lists, clear the watched
+history, and export or import settings.
+
+The first applicable rule gives the result.
+
+| Order | Condition | Result |
+|---|---|---|
+| 1 | Filtering is off. | Show the video. |
+| 2 | The channel is on the local blocklist. | Hide the video. |
+| 3 | The video has a resume bar or is in the watched set. | Hide the video. |
+| 4 | No subscription set is available. | Show the video. |
+| 5 | The channel is in the subscription set. | Show the video. |
+| 6 | The video is older than the age limit. | Hide the video. |
+| 7 | The video has too few views after the grace period. | Hide the video. |
+| 8 | No rule above applies. | Show the video. |
+
+The default limits are 1095 days, 5000 views, and a 48-hour grace period.
 
 ### Tile controls
 
-Two controls show when the pointer is on a video tile:
+Each readable video tile has a **Not interested** control. This control tries
+to select YouTube's **Not interested** menu item.
 
-- **👎 Not interested.** This control operates YouTube's own "Not
-  interested" function for the video. It shows on all tiles.
-- **🚫 Block channel.** This control operates YouTube's own "Don't recommend
-  channel" function and puts the channel on the local blocklist. It does not
-  show on subscribed channels.
+A tile also has a **Block channel** control if the channel is not in the known
+subscription set. This control adds the channel to the local blocklist. It also
+tries to select YouTube's **Don't recommend channel** menu item.
 
-The local blocklist is necessary because YouTube's function does not remove
-the tiles that are on the screen. The local blocklist removes them
-immediately.
+The native YouTube actions support exact English and German menu labels. If the
+extension cannot find one exact menu item, it does not select a menu item. The
+local blocklist update does not depend on the native YouTube action.
 
-### The subscription list
+## Privacy and compatibility
 
-The subscription list controls rule 5. The extension keeps the list current
-with five mechanisms:
+The extension has no analytics and does not call a remote API. It reads YouTube
+pages and uses the browser storage APIs. It does not send data to the project
+author.
 
-1. **Subscribe capture.** When you subscribe on a watch page, the extension
-   adds the channel to the list immediately.
-2. **Unsubscribe capture.** When you unsubscribe on a watch page, the
-   extension removes the channel. Before it removes the channel, it reads
-   the button state two times to make sure.
-3. **Off-device reconciliation.** When you subscribe or unsubscribe on a
-   different device, this browser's list is not correct. On each watch
-   page, the extension compares the subscribe button state with the list.
-   If the button shows "subscribed" but the channel is not on the list, the
-   extension adds the channel. If the button shows "subscribe" but the
-   channel is on the list, the extension removes the channel. Before it
-   writes, it reads the button state two times to make sure.
-4. **Passive collection.** When the list is absent or stale and you open
-   `youtube.com/feed/channels`, the extension monitors the page. It does not
-   scroll for you. It saves the list only if you go to the end of the page.
-5. **Manual collection.** The "Refresh now" button opens the subscriptions
-   page in a new foreground tab. The tab scrolls to the end, saves the
-   list, and closes.
+The manifest requests `storage`, `alarms`, and access to `youtube.com`. It does
+not request other permissions.
 
-The list becomes stale 30 days after the last full collection. A stale list
-does not stop the filters. The extension only shows the amber badge, a
-tooltip with the age in days, and a refresh prompt on the options page and
-in the toolbar panel.
+The text-dependent features have code for English and German. Only the German
+interface is verified against live YouTube pages. The English action labels
+(the menu items and the subscribe button) are not verified. If a label does not
+match exactly, the related action does nothing and writes nothing.
 
-The extension never saves an incomplete list. If a collection does not
-complete, the extension keeps the last good list.
+The automated tests use fixtures from live pages: three German pages and one
+English sidebar page. The age and view parsers have test coverage in both
+languages.
 
----
+The extension treats every other interface language as English. If it cannot
+parse an age or a view count, it shows the video. The watched rule and the
+blocklist rule can still hide the video.
+
+| Data | Storage area |
+|---|---|
+| Filter switches and limits | `sync` |
+| Fetched and manual subscription names | `local` |
+| Blocked channel names | `local` |
+| Watched video IDs | `local` |
+| Subscription cache and collection times | `local` |
+
+The watched set contains a maximum of 5000 video IDs. If a new ID exceeds this
+limit, the extension removes the oldest ID.
+
+Your browser can sync the filter configuration because the extension uses
+`storage.sync`. The extension keeps the channel lists and watched IDs in
+`storage.local`.
+
+The settings export contains all data from both storage areas. An import
+replaces each storage area that is present in the import file.
 
 ## Architecture
 
@@ -177,80 +180,63 @@ src/
   content.js          wiring, SPA navigation, state refresh
   background.js       badge, alarms, collect-tab lifecycle
   options.js          settings UI, manual refresh
-  popup.js            stale-cache toolbar panel
+  popup.js            stale-list toolbar panel
   rules/
     decide.js         pure decision function
     defaults.js
   dom/
-    tile-adapter.js   ALL YouTube tile selectors live here
-    applier.js        MutationObserver, hide/restore
+    tile-adapter.js   all YouTube tile selectors
+    applier.js        MutationObserver, hide and restore
     block-button.js   the two tile controls
-    native-menu.js    operates YouTube's own menu (fail-closed)
+    native-menu.js    operates YouTube's own menu, fail-closed
     styles.js  empty-sections.js  starvation.js
-  locale/             age and view parsing, EN + DE
-  storage/            config (sync), blocklist/watched/subs (local)
+  locale/             age and view parsing, EN and DE
+  storage/            config (sync); blocklist, watched, subs (local)
   subs-refresh.js     subscription collection loop
   subs-scrape.js      channel-name extraction from the page
-  subs-capture.js     subscribe/unsubscribe capture on /watch
+  subs-capture.js     subscribe, unsubscribe, and reconcile on /watch
   channel-name.js     shared name normalization
 ```
 
 Design rules:
 
-- **Filters fail open. Actions fail closed.** If the extension cannot parse
-  a video, the video stays visible. If an action or a write finds an unknown
-  element, an unknown label, or a timeout, it does nothing.
-- **Decisions use the `videoId`, not the DOM node.** YouTube uses DOM nodes
-  again for different videos.
-- **Channel rules use the channel display name.** The tile DOM does not
-  contain a channel ID.
-- All YouTube selectors are in central locations. Each selector is verified
-  on the live page.
+- Filters fail open. If the extension cannot parse a video, the video stays
+  visible.
+- Actions fail closed. If an action finds an unknown element, an unknown
+  label, or a timeout, it does nothing.
+- Decisions use the video ID, not the DOM node. YouTube uses DOM nodes again
+  for different videos.
+- Channel rules use the channel display name. The tile DOM does not contain a
+  channel ID.
+- All YouTube selectors are in central locations.
 
-### Storage
+## Develop
 
-| Key | Area | Notes |
-|---|---|---|
-| config | `sync` | thresholds and switches |
-| `subs` | `local` | `{ ids, fetchedAt, format }`; stale after 30 days |
-| `manualSubs` | `local` | user entries; the extension adds them to the fetched set |
-| `blocklist` | `local` | channel display names |
-| `watched` | `local` | LRU with a limit of 5000 entries |
+| Command | Result |
+|---|---|
+| `npm test` | Run the Node.js tests with jsdom. |
+| `npm run build` | Create the IIFE bundles. |
+| `npm run icons` | Create the four PNG icon files. |
+| `npm run package` | Create `youtube-tuner-<version>.zip`. |
+| `npm run crx` | Create a signed CRX3 file. |
 
----
+The direct development dependencies are esbuild and jsdom. The package tool
+uses an allowlist of 11 extension files. A test verifies this list so that the
+package does not include source files.
 
-## Development
+The CRX tool reads the RSA private key from `YTT_CRX_KEY`. If this variable is
+not set, it reads `key.pem` from the repository root. The tool stops if the key
+does not exist. It never creates a replacement key because a different key
+changes the extension ID.
 
-```bash
-npm test        # node --test + jsdom
-npm run build   # esbuild, IIFE (MV3 content scripts cannot be ES modules)
-npm run icons   # makes the four PNG files again
-npm run package # -> youtube-tuner-<version>.zip
-npm run crx     # -> signed youtube-tuner-<version>.crx
-```
+After you install a new build, reload each open YouTube tab. Old content scripts
+stay active until you reload the tab.
 
-When you install a new build, also reload the open YouTube tabs. Old content
-scripts stay in open tabs.
-
-The only npm dependencies are esbuild and jsdom. `tools/make-icons.mjs`
-makes the PNG files and `tools/package.mjs` makes the ZIP container with
-`zlib` and `crypto` only. A test compares the full file list of the archive.
-Thus the archive cannot contain source files by accident.
-
-`npm run crx` signs the archive as a CRX3 file. It reads the RSA key from
-the path in `YTT_CRX_KEY`, or from `key.pem` in the repository root. If the
-key is absent, the tool stops. It does not make a new key, because the key
-sets the extension ID. The patterns `*.pem` and `*.crx` are in `.gitignore`.
-
-### Releases
-
-Push a tag `v<version>` to start the release workflow. The workflow runs
-the tests, compares the tag with the manifest version, builds the ZIP and
-the signed CRX, and creates the GitHub release.
-
----
+Push a tag in the form `v<version>` to create a release. The workflow runs the
+tests, checks the manifest version, builds both release files, and creates the
+GitHub release.
 
 ## License
 
-The license is [AGPL-3.0](LICENSE). YouTube is a trademark of Google LLC.
-This project has no connection with Google.
+The project uses the [AGPL-3.0 license](LICENSE). YouTube is a trademark of
+Google LLC. This project has no connection with Google.
