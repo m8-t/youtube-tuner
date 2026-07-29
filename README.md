@@ -142,10 +142,14 @@ author.
 The manifest requests `storage`, `alarms`, and access to `youtube.com`. It does
 not request other permissions.
 
-The text-dependent features have code for English and German. Only the German
-interface is verified against live YouTube pages. The English action labels
-(the menu items and the subscribe button) are not verified. If a label does not
-match exactly, the related action does nothing and writes nothing.
+The text-dependent features have code for English and German. Live captures
+verified the German interface and the English watch-page sidebar. The English
+action labels (the menu items and the subscribe button) are not verified.
+
+If a menu label does not match exactly, the extension does not select a menu
+item. If a subscribe-button label does not match exactly, the extension does
+not change the subscription list. The **Block channel** control updates the
+local blocklist independently of the menu label.
 
 The automated tests use fixtures from live pages: three German pages and one
 English sidebar page. The age and view parsers have test coverage in both
@@ -200,10 +204,11 @@ src/
 
 Design rules:
 
-- Filters fail open. If the extension cannot parse a video, the video stays
-  visible.
-- Actions fail closed. If an action finds an unknown element, an unknown
-  label, or a timeout, it does nothing.
+- Filters fail open. An unreadable tile stays visible. An unparseable age or
+  view count only disables the age rule and the view rule.
+- Native actions and subscription-list writes fail closed. An unknown
+  element, an unknown label, or a timeout causes no click and no write. The
+  local blocklist write is intentionally independent.
 - Decisions use the video ID, not the DOM node. YouTube uses DOM nodes again
   for different videos.
 - Channel rules use the channel display name. The tile DOM does not contain a
