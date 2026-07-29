@@ -17,8 +17,9 @@ browser.
 subscribed channels. Only the blocklist rule and the watched rule apply to
 all channels.
 
-🔒 **Private by design:** no analytics, no remote API calls, no accounts. The
-extension requests only `storage`, `alarms`, and access to `youtube.com`.
+🔒 **Private by design:** no analytics, no remote API calls, no accounts, no
+third-party code in the bundle. The extension requests only `storage`,
+`alarms`, and access to `youtube.com`.
 
 🔄 **Self-maintaining:** after one initial collection, the subscription list
 updates itself when you subscribe or unsubscribe. This also works for changes
@@ -28,7 +29,7 @@ that you make on a different device.
 code, but its action labels are not verified. On all other languages, the
 extension falls back to safe behavior.
 
-📜 **License:** AGPL-3.0, zero runtime dependencies.
+📜 **License:** AGPL-3.0.
 
 This README uses [ASD-STE100 Simplified Technical
 English](https://www.asd-ste100.org/). The simple sentences are intentional.
