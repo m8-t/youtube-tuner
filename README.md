@@ -26,11 +26,22 @@ Download the files from the [releases page](../../releases).
 Use this procedure in a Chromium browser that can load unpacked extensions.
 
 1. Download `youtube-tuner-<version>.zip`.
-2. Extract the ZIP file to a permanent directory.
-3. Open `chrome://extensions`.
-4. Enable **Developer mode**.
-5. Select **Load unpacked**.
-6. Select the extracted directory.
+2. Make a new, empty folder in a permanent location, for example
+   `Documents/youtube-tuner`. Do not use the Downloads folder.
+3. Extract the ZIP file into this folder. The folder must then contain the
+   file `manifest.json`.
+4. Type `chrome://extensions` in the browser address bar and press Enter.
+5. Turn on the **Developer mode** switch in the top right corner of the
+   page.
+6. Select the **Load unpacked** button in the top left corner of the page.
+7. In the folder dialog, select the folder from step 2.
+
+The browser loads the extension from this folder at each start. If you
+delete, move, or rename the folder, the extension stops.
+
+To update the extension: download the new ZIP file, extract it into the same
+folder, and replace all files. Then select the reload symbol (circular
+arrow) on the youtube-tuner card in `chrome://extensions`.
 
 ### Install the CRX file
 
