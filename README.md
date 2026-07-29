@@ -185,9 +185,9 @@ call is the optional daily update check: one request to `api.github.com`
 that contains no personal data beyond your IP address. The toolbar menu has
 a switch that turns it off.
 
-The manifest requests `storage`, `alarms`, access to `youtube.com`, and
-access to `api.github.com` for the update check. It does not request other
-permissions.
+The manifest requests `storage`, `alarms`, and access to `youtube.com`. It
+does not request other permissions. The update check needs no extra
+permission because the GitHub API permits cross-origin requests.
 
 The text-dependent features have code for English and German. Live captures
 verified the German interface and the English watch-page sidebar. The English
