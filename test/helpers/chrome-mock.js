@@ -10,6 +10,9 @@ export function installChromeMock({ install = true } = {}) {
     startup: [],
   };
   const alarmCreates = [];
+  const actionCalls = {
+    popups: [],
+  };
 
   const makeEvent = (name) => ({
     addListener(fn) {
@@ -54,7 +57,9 @@ export function installChromeMock({ install = true } = {}) {
       onClicked: makeEvent('clicked'),
       setBadgeText() {},
       setBadgeBackgroundColor() {},
-      setPopup() {},
+      setPopup(options) {
+        actionCalls.popups.push(options);
+      },
       setTitle() {},
     },
     alarms: {
@@ -64,6 +69,9 @@ export function installChromeMock({ install = true } = {}) {
       onAlarm: makeEvent('alarm'),
     },
     runtime: {
+      getManifest() {
+        return { version: '0.7.0' };
+      },
       onInstalled: makeEvent('installed'),
       onMessage: makeEvent('message'),
       onStartup: makeEvent('startup'),
@@ -84,6 +92,7 @@ export function installChromeMock({ install = true } = {}) {
   if (install) globalThis.chrome = chromeMock;
 
   return {
+    actionCalls,
     alarmCreates,
     areas,
     chrome: chromeMock,

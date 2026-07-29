@@ -4,4 +4,5 @@ export const DEFAULT_CONFIG = {
   viewRule: { enabled: true, minViews: 5000, graceHours: 48 },
   watchedRule: { enabled: true },
   blocklistRule: { enabled: true },
+  updateCheck: { enabled: true },
 };

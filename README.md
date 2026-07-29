@@ -17,9 +17,10 @@ browser.
 subscribed channels. Only the blocklist rule and the watched rule apply to
 all channels.
 
-🔒 **Private by design:** no analytics, no remote API calls, no accounts, no
-third-party code in the bundle. The extension requests only `storage`,
-`alarms`, and access to `youtube.com`.
+🔒 **Private by design:** no analytics, no accounts, no third-party code in
+the bundle. The only external call is one optional request per day to
+`api.github.com` for the update check. A switch in the toolbar menu turns
+this off.
 
 🔄 **Self-maintaining:** after one initial collection, the subscription list
 updates itself when you subscribe or unsubscribe. This also works for changes
@@ -86,6 +87,13 @@ The project uses one permanent signing key for all CRX releases. The same key
 gives each CRX release the same extension ID. The extension has no automatic
 update service. Install each new release manually.
 
+The extension can tell you about a new release. Once per day it asks the
+GitHub releases API for the newest version. If a newer release exists, the
+toolbar menu and the icon tooltip show a notice with a link to the releases
+page. The extension does not download or install the release. The toolbar
+menu has a **Check for updates** button for a manual check and a switch that
+turns the daily check off.
+
 The browser connects stored data to the extension ID. Export your settings
 before you change the installation method.
 
@@ -129,9 +137,11 @@ complete. If collection fails, it keeps the last good full list.
 ### Filter order
 
 The toolbar badge shows the number of hidden videos. An amber badge means that
-the subscription list is absent or stale. In this case, the toolbar icon opens
-a panel with the filter switch and the refresh control. With a current list,
-the icon turns filtering on or off.
+the subscription list is absent or stale.
+
+A click on the toolbar icon opens the control menu. The menu has the filter
+on/off switch, the subscription-list status with a refresh button, the
+**Check for updates** button, and the daily update check switch.
 
 Use the options page to set the limits, edit channel lists, clear the watched
 history, and export or import settings.
@@ -169,12 +179,15 @@ controls](assets/watch-page.jpg)
 
 ## Privacy and compatibility
 
-The extension has no analytics and does not call a remote API. It reads YouTube
-pages and uses the browser storage APIs. It does not send data to the project
-author.
+The extension has no analytics. It reads YouTube pages and uses the browser
+storage APIs. It does not send data to the project author. The only external
+call is the optional daily update check: one request to `api.github.com`
+that contains no personal data beyond your IP address. The toolbar menu has
+a switch that turns it off.
 
-The manifest requests `storage`, `alarms`, and access to `youtube.com`. It does
-not request other permissions.
+The manifest requests `storage`, `alarms`, access to `youtube.com`, and
+access to `api.github.com` for the update check. It does not request other
+permissions.
 
 The text-dependent features have code for English and German. Live captures
 verified the German interface and the English watch-page sidebar. The English
@@ -200,6 +213,7 @@ blocklist rule can still hide the video.
 | Blocked channel names | `local` |
 | Watched video IDs | `local` |
 | Subscription cache and collection times | `local` |
+| Update check time and newest release tag | `local` |
 
 The watched set contains a maximum of 5000 video IDs. If a new ID exceeds this
 limit, the extension removes the oldest ID.
@@ -218,7 +232,8 @@ src/
   content.js          wiring, SPA navigation, state refresh
   background.js       badge, alarms, collect-tab lifecycle
   options.js          settings UI, manual refresh
-  popup.js            stale-list toolbar panel
+  popup.js            toolbar control menu
+  update-check.js     daily and manual release check via the GitHub API
   rules/
     decide.js         pure decision function
     defaults.js

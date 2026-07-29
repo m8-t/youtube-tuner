@@ -1,7 +1,13 @@
-import { loadConfig, saveConfig } from './storage/config.js';
+import { loadConfig, onConfigChange } from './storage/config.js';
 import { loadSubs, loadSubsMeta } from './storage/subs.js';
+import {
+  UPDATE_CHECK_COMPLETE_MESSAGE,
+  checkForUpdate,
+  updateAvailable,
+} from './update-check.js';
 
 const SUBS_ALARM = 'refresh-subs';
+const UPDATE_ALARM = 'check-update';
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const NORMAL_BADGE_COLOR = '#606060';
 export const STALE_BADGE_COLOR = '#B36B00';
@@ -9,7 +15,7 @@ export const COLLECT_TAB_URL =
   'https://www.youtube.com/feed/channels#ytt-collect';
 export const SUBS_COLLECTION_RESULT_MESSAGE = 'subs-collection-result';
 export const CANCEL_SUBS_REFRESH_MESSAGE = 'cancel-subs-refresh';
-export const STALE_POPUP_PATH = 'popup.html';
+export const POPUP_PATH = 'popup.html';
 
 function warnRefreshFailure(reason, error) {
   if (error === undefined) {
@@ -190,27 +196,33 @@ export function updateCountsBadge(message, tabId, {
   });
 }
 
-export function updateSubscriptionPopup(stale, {
-  action = chrome.action,
-} = {}) {
-  action.setPopup({
-    popup: stale === true ? STALE_POPUP_PATH : '',
-  });
-}
-
 export async function refreshSubscriptionIndicators({
   action = chrome.action,
   tabs = chrome.tabs,
+  loadMeta = loadSubsMeta,
+  loadConfiguration = loadConfig,
+  getUpdateAvailable = updateAvailable,
+  storage = chrome.storage,
+  currentVersion = chrome.runtime.getManifest().version,
 } = {}) {
-  const meta = await loadSubsMeta();
+  const [meta, config] = await Promise.all([
+    loadMeta(),
+    loadConfiguration(),
+  ]);
+  let latestTag = null;
+  if (config.updateCheck.enabled) {
+    try {
+      latestTag = await getUpdateAvailable({ storage, currentVersion });
+    } catch {}
+  }
   const needsNudge = meta === null || meta.stale === true;
   const color = needsNudge
     ? STALE_BADGE_COLOR
     : NORMAL_BADGE_COLOR;
-  const title = subscriptionListTitle(meta);
+  const title = subscriptionListTitle(meta) +
+    (latestTag === null ? '' : ` - update ${latestTag} available`);
   action.setBadgeBackgroundColor({ color });
   action.setTitle({ title });
-  updateSubscriptionPopup(needsNudge, { action });
 
   try {
     const youtubeTabs = await tabs.query({ url: '*://www.youtube.com/*' });
@@ -231,13 +243,51 @@ function startSubscriptionRefresh() {
   return refreshSubscriptionIndicators();
 }
 
+export function createUpdateCheckRunner({
+  fetchFn = fetch,
+  storage = chrome.storage,
+  now = Date.now,
+  currentVersion = () => chrome.runtime.getManifest().version,
+  loadConfiguration = loadConfig,
+  performCheck = checkForUpdate,
+  refreshIndicators = refreshSubscriptionIndicators,
+} = {}) {
+  return async function runUpdateCheck() {
+    const config = await loadConfiguration();
+    if (config.updateCheck.enabled) {
+      try {
+        await performCheck({
+          fetchFn,
+          storage,
+          now: now(),
+          currentVersion: currentVersion(),
+        });
+      } catch (error) {
+        warnRefreshFailure('update-check-failed', error);
+      }
+    }
+    return refreshIndicators();
+  };
+}
+
+const startUpdateCheck = createUpdateCheckRunner();
+
+chrome.action.setPopup({ popup: POPUP_PATH });
 chrome.alarms.create(SUBS_ALARM, { periodInMinutes: 1440 });
+chrome.alarms.create(UPDATE_ALARM, { periodInMinutes: 1440 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SUBS_ALARM) return startSubscriptionRefresh();
+  if (alarm.name === UPDATE_ALARM) return startUpdateCheck();
   return undefined;
 });
 chrome.runtime.onInstalled.addListener(startSubscriptionRefresh);
+chrome.runtime.onInstalled.addListener(startUpdateCheck);
 chrome.runtime.onStartup.addListener(startSubscriptionRefresh);
+chrome.runtime.onStartup.addListener(startUpdateCheck);
+
+onConfigChange(() => {
+  void refreshSubscriptionIndicators();
+});
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   subscriptionTabs.tabRemoved(tabId);
@@ -248,8 +298,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   const tabId = sender.tab?.id;
   if (tabId === undefined) return;
 
-  updateSubscriptionPopup(message.subsStale === true);
-
   // A disabled scan reports zero hidden tiles. Keep the kill switch's "off"
   // badge instead of replacing it with an empty count.
   if (message.enabled === false) return;
@@ -258,6 +306,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === UPDATE_CHECK_COMPLETE_MESSAGE) {
+    void startSubscriptionRefresh();
+    return;
+  }
   if (message?.type === 'refresh-subs') {
     void subscriptionTabs.begin(sendResponse);
     return true;
@@ -268,25 +320,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === CANCEL_SUBS_REFRESH_MESSAGE) {
     void subscriptionTabs.cancel();
-  }
-});
-
-chrome.action.onClicked.addListener(async () => {
-  try {
-    const config = await loadConfig();
-    config.enabled = !config.enabled;
-    await saveConfig(config);
-
-    const tabs = await chrome.tabs.query({ url: '*://www.youtube.com/*' });
-    for (const tab of tabs) {
-      if (tab.id === undefined) continue;
-      chrome.tabs.sendMessage(tab.id, { type: 'rescan' }).catch(() => {});
-      chrome.action.setBadgeText({
-        tabId: tab.id,
-        text: config.enabled ? '' : 'off',
-      });
-    }
-  } catch (error) {
-    console.warn('[youtube-tuner] kill switch failed', error);
   }
 });

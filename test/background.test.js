@@ -6,9 +6,11 @@ const mock = installChromeMock();
 const {
   COLLECT_TAB_URL,
   NORMAL_BADGE_COLOR,
+  POPUP_PATH,
   STALE_BADGE_COLOR,
   SUBS_COLLECTION_RESULT_MESSAGE,
   createSubscriptionTabCoordinator,
+  createUpdateCheckRunner,
   refreshSubscriptionIndicators,
   refreshSubs,
   updateCountsBadge,
@@ -19,7 +21,8 @@ const {
 } = await import('../src/storage/subs.js');
 
 beforeEach(async () => {
-  await chrome.storage.local.remove('subs');
+  await chrome.storage.local.remove(['subs', 'updateCheck']);
+  await chrome.storage.sync.remove('config');
 });
 
 function tabsHarness() {
@@ -47,10 +50,16 @@ function tabsHarness() {
   };
 }
 
-test('background keeps the daily stale-cache alarm', () => {
+test('background keeps both daily maintenance alarms', () => {
   assert.deepEqual(mock.alarmCreates, [
     { name: 'refresh-subs', options: { periodInMinutes: 1440 } },
+    { name: 'check-update', options: { periodInMinutes: 1440 } },
   ]);
+});
+
+test('background permanently attaches the popup and has no click handler', () => {
+  assert.deepEqual(mock.actionCalls.popups, [{ popup: POPUP_PATH }]);
+  assert.deepEqual(mock.events.clicked, []);
 });
 
 test('fresh subscription cache needs no foreground collection tab', async () => {
@@ -105,18 +114,14 @@ test('fresh count messages keep the hidden count and use the normal badge', () =
   }]);
 });
 
-test('absent subscription indicators use amber, attach popup, and explain collection', async () => {
+test('absent subscription indicators use amber and explain collection', async () => {
   const colors = [];
-  const popups = [];
   const titles = [];
 
   await refreshSubscriptionIndicators({
     action: {
       setBadgeBackgroundColor(options) {
         colors.push(options);
-      },
-      setPopup(options) {
-        popups.push(options);
       },
       setTitle(options) {
         titles.push(options);
@@ -126,7 +131,6 @@ test('absent subscription indicators use amber, attach popup, and explain collec
   });
 
   assert.deepEqual(colors, [{ color: STALE_BADGE_COLOR }]);
-  assert.deepEqual(popups, [{ popup: 'popup.html' }]);
   assert.match(
     titles[0].title,
     /subscription list not collected yet - click to collect/i,
@@ -134,7 +138,7 @@ test('absent subscription indicators use amber, attach popup, and explain collec
   assert.doesNotMatch(titles[0].title, /\b\d+ days? old\b/i);
 });
 
-test('stale subscription indicators use amber, attach popup, and show age', async () => {
+test('stale subscription indicators use amber and show age', async () => {
   await chrome.storage.local.set({
     subs: {
       format: SUBS_FORMAT_VERSION,
@@ -143,16 +147,12 @@ test('stale subscription indicators use amber, attach popup, and show age', asyn
     },
   });
   const colors = [];
-  const popups = [];
   const titles = [];
 
   await refreshSubscriptionIndicators({
     action: {
       setBadgeBackgroundColor(options) {
         colors.push(options);
-      },
-      setPopup(options) {
-        popups.push(options);
       },
       setTitle(options) {
         titles.push(options);
@@ -162,11 +162,10 @@ test('stale subscription indicators use amber, attach popup, and show age', asyn
   });
 
   assert.deepEqual(colors, [{ color: STALE_BADGE_COLOR }]);
-  assert.deepEqual(popups, [{ popup: 'popup.html' }]);
   assert.match(titles[0].title, /subscription list is 30 days old/i);
 });
 
-test('fresh subscription indicators use normal color and clear the toolbar popup', async () => {
+test('fresh subscription indicators use normal color', async () => {
   await chrome.storage.local.set({
     subs: {
       format: SUBS_FORMAT_VERSION,
@@ -175,15 +174,11 @@ test('fresh subscription indicators use normal color and clear the toolbar popup
     },
   });
   const colors = [];
-  const popups = [];
 
   await refreshSubscriptionIndicators({
     action: {
       setBadgeBackgroundColor(options) {
         colors.push(options);
-      },
-      setPopup(options) {
-        popups.push(options);
       },
       setTitle() {},
     },
@@ -191,59 +186,115 @@ test('fresh subscription indicators use normal color and clear the toolbar popup
   });
 
   assert.deepEqual(colors, [{ color: NORMAL_BADGE_COLOR }]);
-  assert.deepEqual(popups, [{ popup: '' }]);
 });
 
-test('stale count messages attach the same toolbar popup', (t) => {
-  const popups = [];
-  const originalSetPopup = chrome.action.setPopup;
-  chrome.action.setPopup = (options) => popups.push(options);
-  t.after(() => {
-    chrome.action.setPopup = originalSetPopup;
+test('an available update changes the tooltip without amber', async () => {
+  const colors = [];
+  const titles = [];
+
+  await refreshSubscriptionIndicators({
+    action: {
+      setBadgeBackgroundColor(options) {
+        colors.push(options);
+      },
+      setTitle(options) {
+        titles.push(options);
+      },
+    },
+    tabs: { query: async () => [] },
+    loadMeta: async () => ({
+      ageMs: 0,
+      stale: false,
+    }),
+    loadConfiguration: async () => ({
+      updateCheck: { enabled: true },
+    }),
+    getUpdateAvailable: async () => 'v0.7.1',
+    currentVersion: '0.7.0',
   });
 
-  mock.events.message[0]({
-    type: 'counts',
-    hidden: 4,
-    enabled: true,
-    subsStale: true,
-  }, { tab: { id: 43 } });
-
-  assert.deepEqual(popups, [{ popup: 'popup.html' }]);
+  assert.deepEqual(colors, [{ color: NORMAL_BADGE_COLOR }]);
+  assert.match(titles[0].title, /update v0\.7\.1 available/);
 });
 
-test('fresh count messages clear the toolbar popup', (t) => {
-  const popups = [];
-  const originalSetPopup = chrome.action.setPopup;
-  chrome.action.setPopup = (options) => popups.push(options);
-  t.after(() => {
-    chrome.action.setPopup = originalSetPopup;
-  });
+test('a disabled update check hides any cached update nudge', async () => {
+  const titles = [];
 
-  mock.events.message[0]({
-    type: 'counts',
-    hidden: 2,
-    enabled: true,
-    subsStale: false,
-  }, { tab: { id: 44 } });
-
-  assert.deepEqual(popups, [{ popup: '' }]);
-});
-
-test('fresh-cache toolbar clicks still toggle filtering', async () => {
-  await chrome.storage.local.set({
-    subs: {
-      format: SUBS_FORMAT_VERSION,
-      ids: ['Channel A'],
-      fetchedAt: Date.now(),
+  await refreshSubscriptionIndicators({
+    action: {
+      setBadgeBackgroundColor() {},
+      setTitle(options) {
+        titles.push(options);
+      },
+    },
+    tabs: { query: async () => [] },
+    loadMeta: async () => ({
+      ageMs: 0,
+      stale: false,
+    }),
+    loadConfiguration: async () => ({
+      updateCheck: { enabled: false },
+    }),
+    getUpdateAvailable: async () => {
+      assert.fail('disabled checks must not read a cached update nudge');
     },
   });
-  await chrome.storage.sync.set({ config: { enabled: true } });
 
-  await mock.events.clicked[0]();
-  const stored = await chrome.storage.sync.get('config');
+  assert.doesNotMatch(titles[0].title, /update/i);
+});
 
-  assert.equal(stored.config.enabled, false);
+test('update check runner skips fetches when disabled and still recomputes', async () => {
+  let checks = 0;
+  let refreshes = 0;
+  const runUpdateCheck = createUpdateCheckRunner({
+    loadConfiguration: async () => ({
+      updateCheck: { enabled: false },
+    }),
+    performCheck: async () => {
+      checks += 1;
+    },
+    refreshIndicators: async () => {
+      refreshes += 1;
+    },
+  });
+
+  await runUpdateCheck();
+
+  assert.equal(checks, 0);
+  assert.equal(refreshes, 1);
+});
+
+test('update check runner fetches when enabled and then recomputes', async () => {
+  const calls = [];
+  const storage = { local: {} };
+  const fetchFn = async () => {};
+  const runUpdateCheck = createUpdateCheckRunner({
+    fetchFn,
+    storage,
+    now: () => 123,
+    currentVersion: () => '0.7.0',
+    loadConfiguration: async () => ({
+      updateCheck: { enabled: true },
+    }),
+    performCheck: async (options) => {
+      calls.push(['check', options]);
+    },
+    refreshIndicators: async () => {
+      calls.push(['refresh']);
+    },
+  });
+
+  await runUpdateCheck();
+
+  assert.deepEqual(calls, [
+    ['check', {
+      fetchFn,
+      storage,
+      now: 123,
+      currentVersion: '0.7.0',
+    }],
+    ['refresh'],
+  ]);
 });
 
 test('daily alarm updates badge and tooltip without opening a tab', async (t) => {

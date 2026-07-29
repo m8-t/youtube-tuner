@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -26,6 +27,14 @@ function settingsHarness() {
     statusElement: { textContent: '' },
   };
 }
+
+test('options page has no update-check controls', () => {
+  const markup = readFileSync('options.html', 'utf8');
+
+  assert.doesNotMatch(markup, /update-check-enabled/);
+  assert.doesNotMatch(markup, /check-update/);
+  assert.doesNotMatch(markup, /update-status/);
+});
 
 async function renderStatusHarness(ageMs = null) {
   const mock = installChromeMock({ install: false });

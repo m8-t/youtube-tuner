@@ -103,5 +103,9 @@ test('manifest and package versions stay in sync', async () => {
     readFile('package.json', 'utf8').then(JSON.parse),
   ]);
   assert.equal(manifest.version, packageJson.version);
-  assert.equal(manifest.version, '0.6.1');
+  assert.equal(manifest.version, '0.7.0');
+  assert.deepEqual(manifest.host_permissions, [
+    '*://*.youtube.com/*',
+    'https://api.github.com/*',
+  ]);
 });

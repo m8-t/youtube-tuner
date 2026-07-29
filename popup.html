@@ -12,16 +12,27 @@
       }
       p { margin: 0 0 .8em; }
       button { cursor: pointer; margin-bottom: .8em; }
-      label { display: block; }
+      label { display: block; margin-bottom: .8em; }
+      hr { border: 0; border-top: 1px solid #ddd; margin: 1em 0; }
       .explanation { color: #555; }
     </style>
   </head>
   <body>
+    <label><input type="checkbox" id="enabled"> Filtering enabled</label>
+
+    <hr>
+
     <p id="subs-age"></p>
     <button id="refresh-subs" type="button">Refresh now</button>
     <p class="explanation">A YouTube channels tab will open, scroll to the end
       (about 20 seconds), and close by itself.</p>
-    <label><input type="checkbox" id="enabled"> Filtering enabled</label>
+
+    <hr>
+
+    <button id="check-update" type="button">Check for updates</button>
+    <p id="update-status" hidden></p>
+    <label><input type="checkbox" id="update-check-enabled">
+      Check for updates once per day (asks api.github.com)</label>
 
     <script src="dist/popup.js"></script>
   </body>
