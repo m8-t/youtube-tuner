@@ -18,12 +18,12 @@ export function injectStyles(doc) {
     .${NOT_INTERESTED_BUTTON_CLASS} {
       position: absolute; left: 6px; z-index: 9999;
       opacity: .45; transition: opacity .12s;
-      border: none; border-radius: 4px; cursor: pointer;
+      border: none; border-radius: 6px; cursor: pointer;
       background: rgba(0,0,0,.75); color: #fff;
-      font-size: 13px; line-height: 1; padding: 5px 6px;
+      font-size: 18px; line-height: 1; padding: 6px 7px;
     }
     .${NOT_INTERESTED_BUTTON_CLASS} { top: 6px; }
-    .${BLOCK_BUTTON_CLASS} { top: 40px; }
+    .${BLOCK_BUTTON_CLASS} { top: 46px; }
     .${BLOCK_HOST_CLASS}:hover > .${BLOCK_BUTTON_CLASS},
     .${BLOCK_HOST_CLASS}:hover > .${NOT_INTERESTED_BUTTON_CLASS},
     .${BLOCK_BUTTON_CLASS}:focus-visible,
