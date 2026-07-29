@@ -1,18 +1,33 @@
 # youtube-tuner
 
-youtube-tuner is a Manifest V3 extension for Chromium browsers. It filters
-video tiles in the YouTube home feed and in the watch-page sidebar.
+youtube-tuner removes unwanted videos from your YouTube recommendations. It is
+a Manifest V3 extension for Chromium browsers and operates fully in your
+browser.
 
-The extension can hide a video for these reasons:
+**What it hides** in the home feed and the watch-page sidebar:
 
-- The channel is on your local blocklist.
-- You opened the video before, or the tile has a resume bar.
-- The video is older than your age limit.
-- The video has too few views after a grace period.
+- Videos from channels on your local blocklist
+- Videos that you opened before
+- Videos that are older than your age limit
+- Videos with too few views after a grace period
 
-A known subscription list protects subscribed channels from the age rule and
-the view rule. It does not protect them from the blocklist rule or the watched
-rule.
+**What it protects:** the age rule and the view rule do not apply to your
+subscribed channels. Only the blocklist rule and the watched rule apply to
+all channels.
+
+**Private by design:** no analytics, no remote API calls, no accounts. The
+extension requests only `storage`, `alarms`, and access to `youtube.com`.
+
+**Self-maintaining:** after one initial collection, the subscription list
+updates itself when you subscribe or unsubscribe. This also works for changes
+that you make on a different device.
+
+**Language support:** the German YouTube interface is verified. English has
+code, but its action labels are not verified. On all other languages, the
+extension falls back to safe behavior.
+
+**License and quality:** AGPL-3.0, 257 automated tests, zero runtime
+dependencies.
 
 This README uses [ASD-STE100 Simplified Technical
 English](https://www.asd-ste100.org/). The simple sentences are intentional.
