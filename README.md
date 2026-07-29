@@ -1,5 +1,7 @@
 # youtube-tuner
 
+[![Release](https://github.com/m8-t/youtube-tuner/actions/workflows/release.yml/badge.svg)](https://github.com/m8-t/youtube-tuner/actions/workflows/release.yml)
+
 youtube-tuner removes unwanted videos from your YouTube recommendations. It is
 a Manifest V3 extension for Chromium browsers and operates fully in your
 browser.
