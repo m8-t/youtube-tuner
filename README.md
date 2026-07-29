@@ -26,8 +26,7 @@ that you make on a different device.
 code, but its action labels are not verified. On all other languages, the
 extension falls back to safe behavior.
 
-**License and quality:** AGPL-3.0, 257 automated tests, zero runtime
-dependencies.
+**License:** AGPL-3.0, zero runtime dependencies.
 
 This README uses [ASD-STE100 Simplified Technical
 English](https://www.asd-ste100.org/). The simple sentences are intentional.
