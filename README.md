@@ -83,6 +83,10 @@ procedures:
 
 If the browser rejects the CRX file, use the ZIP procedure.
 
+An update over an installed CRX can stay inactive until you fully restart
+the browser. The extensions page shows the new version number only after
+the restart.
+
 The project uses one permanent signing key for all CRX releases. The same key
 gives each CRX release the same extension ID. The extension has no automatic
 update service. Install each new release manually.
@@ -95,7 +99,11 @@ menu has a **Check for updates** button for a manual check and a switch that
 turns the daily check off.
 
 The browser connects stored data to the extension ID. Export your settings
-before you change the installation method.
+before you change the installation method. If you remove the extension, the
+browser deletes its stored data. An update keeps the data.
+
+After each installation or update, reload the open YouTube tabs. The
+extension does not attach to tabs that were open before.
 
 ## Configure
 
