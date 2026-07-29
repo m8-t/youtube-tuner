@@ -307,17 +307,20 @@ async function main({
   });
 
   config = await loadConfig();
-  createSubscribeCapture({
+  const capture = createSubscribeCapture({
     documentObject: document,
     getPathname: () => location.pathname,
     getEnabled: () => config.enabled,
     addNames: addSubNames,
     removeNames: removeSubNames,
-  }).start();
+    getCachedNames: () => state.subs,
+  });
+  capture.start();
   const fetchedSubs = await refreshState();
 
   filtering.sync();
   recordCurrentVideo();
+  capture.reconcile();
 
   // YouTube is a SPA: it fires yt-navigate-finish instead of reloading.
   let passiveAttempted = false;
@@ -361,6 +364,7 @@ async function main({
   };
   window.addEventListener('yt-navigate-finish', () => {
     onNavigate();
+    capture.reconcile();
     updatePassiveCollection();
   });
 

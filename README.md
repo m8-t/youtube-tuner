@@ -11,7 +11,7 @@ open.
 
 - **Permissions:** `storage`, `alarms`, and access to `youtube.com`. No
   other permissions.
-- **Tests:** 244 tests with `node --test` and jsdom. A browser is not
+- **Tests:** 257 tests with `node --test` and jsdom. A browser is not
   necessary for the tests.
 - **License:** AGPL-3.0.
 - **Writing standard:** This README uses
@@ -139,17 +139,24 @@ immediately.
 ### The subscription list
 
 The subscription list controls rule 5. The extension keeps the list current
-with four mechanisms:
+with five mechanisms:
 
 1. **Subscribe capture.** When you subscribe on a watch page, the extension
    adds the channel to the list immediately.
 2. **Unsubscribe capture.** When you unsubscribe on a watch page, the
    extension removes the channel. Before it removes the channel, it reads
    the button state two times to make sure.
-3. **Passive collection.** When the list is absent or stale and you open
+3. **Off-device reconciliation.** When you subscribe or unsubscribe on a
+   different device, this browser's list is not correct. On each watch
+   page, the extension compares the subscribe button state with the list.
+   If the button shows "subscribed" but the channel is not on the list, the
+   extension adds the channel. If the button shows "subscribe" but the
+   channel is on the list, the extension removes the channel. Before it
+   writes, it reads the button state two times to make sure.
+4. **Passive collection.** When the list is absent or stale and you open
    `youtube.com/feed/channels`, the extension monitors the page. It does not
    scroll for you. It saves the list only if you go to the end of the page.
-4. **Manual collection.** The "Refresh now" button opens the subscriptions
+5. **Manual collection.** The "Refresh now" button opens the subscriptions
    page in a new foreground tab. The tab scrolls to the end, saves the
    list, and closes.
 

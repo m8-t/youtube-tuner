@@ -9,6 +9,9 @@ import {
   SUBSCRIBED_LABELS,
   UNSUB_PENDING_TTL_MS,
   CHANNEL_LINK_SELECTOR,
+  RECONCILE_INITIAL_DELAY_MS,
+  RECONCILE_VERIFY_DELAY_MS,
+  RECONCILE_MAX_BUTTON_RETRIES,
 } from '../src/subs-capture.js';
 
 // The owner wrapper and textless-avatar-then-named-anchor shape were verified
@@ -38,11 +41,13 @@ function setupCapture({
   addResult = true,
   removeResult = true,
   now = () => 0,
+  getCachedNames = () => null,
 } = {}) {
   const addCalls = [];
   const removeCalls = [];
   const logCalls = [];
   const timeoutCallbacks = [];
+  const timeoutDelays = [];
   const capture = createSubscribeCapture({
     documentObject: doc,
     getPathname,
@@ -55,8 +60,10 @@ function setupCapture({
       removeCalls.push(names);
       return removeResult;
     },
-    setTimeoutFn: (callback) => {
+    getCachedNames,
+    setTimeoutFn: (callback, delay) => {
       timeoutCallbacks.push(callback);
+      timeoutDelays.push(delay);
       return timeoutCallbacks.length;
     },
     now,
@@ -69,6 +76,7 @@ function setupCapture({
     logCalls,
     removeCalls,
     timeoutCallbacks,
+    timeoutDelays,
   };
 }
 
@@ -96,6 +104,9 @@ test('capture selectors and labels are exported from one module', () => {
   assert.deepEqual([...SUBSCRIBE_LABELS], ['Abonnieren', 'Subscribe']);
   assert.deepEqual([...SUBSCRIBED_LABELS], ['Abonniert', 'Subscribed']);
   assert.equal(UNSUB_PENDING_TTL_MS, 15_000);
+  assert.equal(RECONCILE_INITIAL_DELAY_MS, 1_500);
+  assert.equal(RECONCILE_VERIFY_DELAY_MS, 1_000);
+  assert.equal(RECONCILE_MAX_BUTTON_RETRIES, 5);
   assert.equal(
     CHANNEL_LINK_SELECTOR,
     'a[href^="/@"], a[href^="/channel/"]',
@@ -534,4 +545,263 @@ test('stop detaches the capture-phase click listener', async () => {
   await Promise.resolve();
 
   assert.deepEqual(addCalls, []);
+});
+
+test('reconcile adds when button shows subscribed and name is missing from cache', async () => {
+  const {
+    addCalls,
+    capture,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+    timeoutDelays,
+  } = setupCapture({
+    doc: captureFixture({ label: 'Abonniert' }),
+    getCachedNames: () => new Set(['Other']),
+  });
+
+  capture.reconcile();
+  while (timeoutCallbacks.length > 0) {
+    await timeoutCallbacks.shift()();
+  }
+
+  assert.deepEqual(addCalls, [['Channel Name']]);
+  assert.deepEqual(removeCalls, []);
+  assert.deepEqual(timeoutDelays, [
+    RECONCILE_INITIAL_DELAY_MS,
+    RECONCILE_VERIFY_DELAY_MS,
+  ]);
+  assert.deepEqual(logCalls, [
+    ['[youtube-tuner] subs-capture: offdevice-added "Channel Name"'],
+  ]);
+});
+
+test('reconcile removes when button shows subscribe and name is in cache', async () => {
+  const {
+    addCalls,
+    capture,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+  } = setupCapture({
+    doc: captureFixture({ label: 'Abonnieren' }),
+    getCachedNames: () => new Set(['Channel Name']),
+  });
+
+  capture.reconcile();
+  while (timeoutCallbacks.length > 0) {
+    await timeoutCallbacks.shift()();
+  }
+
+  assert.deepEqual(addCalls, []);
+  assert.deepEqual(removeCalls, [['Channel Name']]);
+  assert.deepEqual(logCalls, [
+    ['[youtube-tuner] subs-capture: offdevice-removed "Channel Name"'],
+  ]);
+});
+
+test('reconcile does nothing when state and cache agree', async () => {
+  for (const { label, cachedNames } of [
+    { label: 'Abonniert', cachedNames: new Set(['Channel Name']) },
+    { label: 'Abonnieren', cachedNames: new Set(['Other']) },
+  ]) {
+    const {
+      addCalls,
+      capture,
+      logCalls,
+      removeCalls,
+      timeoutCallbacks,
+    } = setupCapture({
+      doc: captureFixture({ label }),
+      getCachedNames: () => cachedNames,
+    });
+
+    capture.reconcile();
+    while (timeoutCallbacks.length > 0) {
+      await timeoutCallbacks.shift()();
+    }
+
+    assert.deepEqual(addCalls, [], label);
+    assert.deepEqual(removeCalls, [], label);
+    assert.deepEqual(logCalls, [], label);
+  }
+});
+
+test('reconcile does nothing when cache is null', async () => {
+  const {
+    addCalls,
+    capture,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+  } = setupCapture({
+    doc: captureFixture({ label: 'Abonniert' }),
+  });
+
+  capture.reconcile();
+  while (timeoutCallbacks.length > 0) {
+    await timeoutCallbacks.shift()();
+  }
+
+  assert.deepEqual(addCalls, []);
+  assert.deepEqual(removeCalls, []);
+  assert.deepEqual(logCalls, []);
+});
+
+test('reconcile aborts when the confirm read disagrees', async () => {
+  const {
+    addCalls,
+    capture,
+    doc,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+  } = setupCapture({
+    doc: captureFixture({ label: 'Abonniert' }),
+    getCachedNames: () => new Set(),
+  });
+
+  capture.reconcile();
+  await timeoutCallbacks.shift()();
+  doc.querySelector('#subscribe').textContent = 'Abonnieren';
+  await timeoutCallbacks.shift()();
+
+  assert.deepEqual(addCalls, []);
+  assert.deepEqual(removeCalls, []);
+  assert.deepEqual(logCalls, []);
+});
+
+test('reconcile aborts when cache membership changes between reads', async () => {
+  const cachedNames = new Set();
+  const {
+    addCalls,
+    capture,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+  } = setupCapture({
+    doc: captureFixture({ label: 'Abonniert' }),
+    getCachedNames: () => cachedNames,
+  });
+
+  capture.reconcile();
+  await timeoutCallbacks.shift()();
+  cachedNames.add('Channel Name');
+  await timeoutCallbacks.shift()();
+
+  assert.deepEqual(addCalls, []);
+  assert.deepEqual(removeCalls, []);
+  assert.deepEqual(logCalls, []);
+});
+
+test('a second reconcile invalidates in-flight reads', async () => {
+  const {
+    addCalls,
+    capture,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+  } = setupCapture({
+    doc: captureFixture({ label: 'Abonniert' }),
+    getCachedNames: () => new Set(),
+  });
+
+  capture.reconcile();
+  await timeoutCallbacks.shift()();
+  capture.reconcile();
+  while (timeoutCallbacks.length > 0) {
+    await timeoutCallbacks.shift()();
+  }
+
+  assert.deepEqual(addCalls, [['Channel Name']]);
+  assert.deepEqual(removeCalls, []);
+  assert.deepEqual(logCalls, [
+    ['[youtube-tuner] subs-capture: offdevice-added "Channel Name"'],
+  ]);
+});
+
+test('reconcile retries while the button is absent, then succeeds', async () => {
+  const doc = html('<button id="random">Random</button>');
+  const {
+    addCalls,
+    capture,
+    timeoutCallbacks,
+    timeoutDelays,
+  } = setupCapture({
+    doc,
+    getCachedNames: () => new Set(),
+  });
+
+  capture.reconcile();
+  await timeoutCallbacks.shift()();
+  await timeoutCallbacks.shift()();
+  doc.body.append(
+    captureFixture({ label: 'Abonniert' }).querySelector(OWNER_SELECTOR),
+  );
+  while (timeoutCallbacks.length > 0) {
+    await timeoutCallbacks.shift()();
+  }
+
+  assert.deepEqual(addCalls, [['Channel Name']]);
+  assert.deepEqual(timeoutDelays, [
+    RECONCILE_INITIAL_DELAY_MS,
+    RECONCILE_VERIFY_DELAY_MS,
+    RECONCILE_VERIFY_DELAY_MS,
+    RECONCILE_VERIFY_DELAY_MS,
+  ]);
+});
+
+test('reconcile gives up after max retries', async () => {
+  const {
+    addCalls,
+    capture,
+    logCalls,
+    removeCalls,
+    timeoutCallbacks,
+    timeoutDelays,
+  } = setupCapture({
+    doc: html('<button id="random">Random</button>'),
+    getCachedNames: () => new Set(),
+  });
+
+  capture.reconcile();
+  while (timeoutCallbacks.length > 0) {
+    await timeoutCallbacks.shift()();
+  }
+
+  assert.deepEqual(addCalls, []);
+  assert.deepEqual(removeCalls, []);
+  assert.deepEqual(logCalls, []);
+  assert.equal(timeoutDelays.length, RECONCILE_MAX_BUTTON_RETRIES + 1);
+  assert.equal(timeoutDelays[0], RECONCILE_INITIAL_DELAY_MS);
+  assert.deepEqual(
+    timeoutDelays.slice(1),
+    Array(RECONCILE_MAX_BUTTON_RETRIES).fill(RECONCILE_VERIFY_DELAY_MS),
+  );
+});
+
+test('reconcile is inert off /watch and while disabled', () => {
+  for (const options of [
+    { pathname: '/' },
+    { enabled: false },
+  ]) {
+    const {
+      addCalls,
+      capture,
+      logCalls,
+      removeCalls,
+      timeoutCallbacks,
+    } = setupCapture({
+      ...options,
+      doc: captureFixture({ label: 'Abonniert' }),
+      getCachedNames: () => new Set(),
+    });
+
+    capture.reconcile();
+
+    assert.deepEqual(timeoutCallbacks, [], JSON.stringify(options));
+    assert.deepEqual(addCalls, [], JSON.stringify(options));
+    assert.deepEqual(removeCalls, [], JSON.stringify(options));
+    assert.deepEqual(logCalls, [], JSON.stringify(options));
+  }
 });

@@ -9,6 +9,9 @@ export const OWNER_SELECTOR = '#owner';
 export const SUBSCRIBE_LABELS = new Set(['Abonnieren', 'Subscribe']);
 export const SUBSCRIBED_LABELS = new Set(['Abonniert', 'Subscribed']);
 export const UNSUB_PENDING_TTL_MS = 15_000;
+export const RECONCILE_INITIAL_DELAY_MS = 1_500;
+export const RECONCILE_VERIFY_DELAY_MS = 1_000;
+export const RECONCILE_MAX_BUTTON_RETRIES = 5;
 export const CHANNEL_LINK_SELECTOR = 'a[href^="/@"], a[href^="/channel/"]';
 const UNSUB_VERIFY_DELAY_MS = 500;
 
@@ -18,12 +21,14 @@ export function createSubscribeCapture({
   getEnabled,
   addNames,
   removeNames,
+  getCachedNames = () => null,
   setTimeoutFn = setTimeout,
   now = () => Date.now(),
   log = (...args) => console.log(...args),
 }) {
   let started = false;
   let pending = null;
+  let reconcileToken = 0;
 
   function readOwnerState(owner, button) {
     const lines = (button.textContent ?? '')
@@ -43,6 +48,87 @@ export function createSubscribeCapture({
     } catch {
       return null;
     }
+  }
+
+  function reconcileIsCurrent(token) {
+    return (
+      reconcileToken === token &&
+      getEnabled() &&
+      getPathname() === '/watch'
+    );
+  }
+
+  function reconcileIntent(read) {
+    if (!read?.channelName) return null;
+    const cached = getCachedNames();
+    if (!(cached instanceof Set)) return null;
+    const subscribed = read.lines.some((line) => SUBSCRIBED_LABELS.has(line));
+    const unsubscribed = read.lines.some((line) => SUBSCRIBE_LABELS.has(line));
+    if (subscribed && !cached.has(read.channelName)) {
+      return { action: 'add', name: read.channelName };
+    }
+    if (unsubscribed && !subscribed && cached.has(read.channelName)) {
+      return { action: 'remove', name: read.channelName };
+    }
+    return null;
+  }
+
+  function scheduleReconcileRead(token, retryCount, delay) {
+    setTimeoutFn(async () => {
+      if (!reconcileIsCurrent(token)) return;
+
+      const firstRead = readCurrentOwnerState();
+      if (firstRead === null) {
+        if (retryCount >= RECONCILE_MAX_BUTTON_RETRIES) return;
+        scheduleReconcileRead(
+          token,
+          retryCount + 1,
+          RECONCILE_VERIFY_DELAY_MS,
+        );
+        return;
+      }
+
+      const intent = reconcileIntent(firstRead);
+      if (!intent || !reconcileIsCurrent(token)) return;
+
+      setTimeoutFn(async () => {
+        if (!reconcileIsCurrent(token)) return;
+
+        const confirmIntent = reconcileIntent(readCurrentOwnerState());
+        if (
+          !confirmIntent ||
+          confirmIntent.action !== intent.action ||
+          confirmIntent.name !== intent.name ||
+          !reconcileIsCurrent(token)
+        ) return;
+
+        try {
+          if (intent.action === 'add') {
+            if (await addNames([intent.name])) {
+              log(
+                `[youtube-tuner] subs-capture: offdevice-added "${intent.name}"`,
+              );
+            } else {
+              log('[youtube-tuner] subs-capture: offdevice-add-noop');
+            }
+          } else if (await removeNames([intent.name])) {
+            log(
+              `[youtube-tuner] subs-capture: offdevice-removed "${intent.name}"`,
+            );
+          } else {
+            log('[youtube-tuner] subs-capture: offdevice-remove-noop');
+          }
+        } catch (error) {
+          log('[youtube-tuner] subs-capture: offdevice-failed', error);
+        }
+      }, RECONCILE_VERIFY_DELAY_MS);
+    }, delay);
+  }
+
+  function reconcile() {
+    const token = ++reconcileToken;
+    if (!reconcileIsCurrent(token)) return;
+    scheduleReconcileRead(token, 0, RECONCILE_INITIAL_DELAY_MS);
   }
 
   function pendingIsCurrent(armed) {
@@ -169,5 +255,5 @@ export function createSubscribeCapture({
     documentObject.removeEventListener('click', handleClick, true);
   }
 
-  return { start, stop, handleClick };
+  return { start, stop, handleClick, reconcile };
 }
