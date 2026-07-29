@@ -31,6 +31,9 @@ extension falls back to safe behavior.
 
 📜 **License:** AGPL-3.0.
 
+![The YouTube home feed with the two tile controls on each
+video](assets/home-feed.jpg)
+
 This README uses [ASD-STE100 Simplified Technical
 English](https://www.asd-ste100.org/). The simple sentences are intentional.
 
@@ -160,6 +163,9 @@ tries to select YouTube's **Don't recommend channel** menu item.
 The native YouTube actions support exact English and German menu labels. If the
 extension cannot find one exact menu item, it does not select a menu item. The
 local blocklist update does not depend on the native YouTube action.
+
+![A watch page with the filtered sidebar and the tile
+controls](assets/watch-page.jpg)
 
 ## Privacy and compatibility
 
