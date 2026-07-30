@@ -70,6 +70,8 @@ export function createWebdavBackend({
   username = '',
   password = '',
   fetchFn = globalThis.fetch,
+  probeDelayMs = 1100,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
   const objectUrl = new URL(url);
   if (objectUrl.protocol !== 'https:') {
@@ -92,6 +94,7 @@ export function createWebdavBackend({
           ...headers,
         },
         ...(body === undefined ? {} : { body }),
+        cache: 'no-store',
         redirect: 'error',
         credentials: 'omit',
         signal: controller.signal,
@@ -196,6 +199,8 @@ export function createWebdavBackend({
         result.failure = 'Probe ETag was missing, weak, or unstable';
         return result;
       }
+
+      await sleep(probeDelayMs);
 
       const updateResponse = await request(probeUrl, 'PUT', {
         headers: {

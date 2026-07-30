@@ -16,15 +16,21 @@ function createServer({
   authStatus = null,
   ignoreIfMatch = false,
   omitPutEtag = false,
+  sameTickEtags = false,
   weakEtags = false,
 } = {}) {
   const files = new Map();
   const requests = [];
   let revision = 0;
+  let tick = 0;
 
   function etag() {
-    const value = `"revision-${revision}"`;
+    const value = `"revision-${sameTickEtags ? tick : revision}"`;
     return weakEtags ? `W/${value}` : value;
+  }
+
+  function advanceTick() {
+    tick += 1;
   }
 
   async function fetchFn(url, options = {}) {
@@ -35,6 +41,7 @@ function createServer({
       method,
       headers,
       body: options.body,
+      cache: options.cache,
       redirect: options.redirect,
       credentials: options.credentials,
       signal: options.signal,
@@ -85,7 +92,7 @@ function createServer({
     return new Response(null, { status: 405 });
   }
 
-  return { fetchFn, files, requests };
+  return { advanceTick, fetchFn, files, requests };
 }
 
 function backend(server, overrides = {}) {
@@ -94,6 +101,8 @@ function backend(server, overrides = {}) {
     username: 'alice',
     password: 'secret',
     fetchFn: server.fetchFn,
+    probeDelayMs: 0,
+    sleep: async () => {},
     ...overrides,
   });
 }
@@ -105,6 +114,7 @@ test('read returns null on 404 with the required fetch configuration', async () 
   const [request] = server.requests;
   assert.equal(request.url, OBJECT_URL);
   assert.equal(request.method, 'GET');
+  assert.equal(request.cache, 'no-store');
   assert.equal(request.redirect, 'error');
   assert.equal(request.credentials, 'omit');
   assert.equal(request.headers.get('Authorization'), 'Basic YWxpY2U6c2VjcmV0');
@@ -172,6 +182,18 @@ test('write maps a 412 response to ConflictError', async () => {
   );
 });
 
+test('all requests bypass the HTTP cache', async () => {
+  const server = createServer({ omitPutEtag: true });
+  const webdav = backend(server);
+
+  await webdav.write(bytes([1]), null);
+  await webdav.read();
+  await webdav.test();
+
+  assert.ok(server.requests.length > 0);
+  assert.ok(server.requests.every(({ cache }) => cache === 'no-store'));
+});
+
 test('write falls back to GET when PUT omits its ETag', async () => {
   const server = createServer({ omitPutEtag: true });
   const revision = await backend(server).write(bytes([1]), null);
@@ -232,6 +254,47 @@ test('capability probe passes with strong ETags and CAS support', async () => {
     probeRequests.map(({ method }) => method),
     ['PUT', 'GET', 'PUT', 'PUT', 'DELETE'],
   );
+});
+
+test('capability probe sleeps before its conditional update', async () => {
+  const server = createServer();
+  const sleepCalls = [];
+  const result = await backend(server, {
+    probeDelayMs: 37,
+    sleep: async (ms) => {
+      sleepCalls.push({
+        ms,
+        methods: server.requests.map(({ method }) => method),
+      });
+    },
+  }).test();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(sleepCalls, [{
+    ms: 37,
+    methods: ['PUT', 'GET'],
+  }]);
+});
+
+test('capability probe passes when same-tick writes retain their ETag', async () => {
+  const server = createServer({ sameTickEtags: true });
+  const sleepCalls = [];
+  const result = await backend(server, {
+    probeDelayMs: 1100,
+    sleep: async (ms) => {
+      sleepCalls.push(ms);
+      server.advanceTick();
+    },
+  }).test();
+
+  assert.deepEqual(sleepCalls, [1100]);
+  assert.deepEqual(result, {
+    ok: true,
+    strongEtags: true,
+    cas: true,
+    authOk: true,
+    failure: null,
+  });
 });
 
 test('capability probe detects a server that ignores If-Match', async () => {

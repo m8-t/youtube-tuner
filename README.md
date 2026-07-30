@@ -220,6 +220,9 @@ Use this procedure on the first device:
 2. Open the extension options page, section **Sync**.
 3. Enter the full file URL for the sync data, for example
    `https://cloud.example.com/remote.php/dav/files/USER/youtube-tuner.bin`.
+   The URL must end with a file name. The file does not have to exist; the
+   extension creates it. A folder URL causes an HTTP error such as 403. The
+   folders in the path must already exist.
 4. Enter the username, the app password, and a new passphrase.
 5. Select **Test connection**. The browser asks for permission for this
    server. The test writes and deletes a probe file and reports if the
