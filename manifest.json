@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "youtube-tuner",
-  "version": "0.9.0.2",
-  "version_name": "0.9.0-beta.2",
+  "version": "0.9.0.3",
+  "version_name": "0.9.0-beta.3",
   "description": "Hides old, already-watched, low-view and blocked-channel videos from YouTube recommendations.",
   "icons": {
     "16": "icons/icon-16.png",

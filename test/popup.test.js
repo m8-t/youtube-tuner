@@ -16,6 +16,10 @@ function popupDocument() {
     <input type="checkbox" id="enabled">
     <p id="subs-age"></p>
     <button id="refresh-subs" type="button">Refresh now</button>
+    <div id="sync-row" hidden>
+      <button id="sync-now" type="button">Sync now</button>
+      <small id="sync-status"></small>
+    </div>
     <button id="check-update" type="button">Check for updates</button>
     <p id="update-status" hidden></p>
     <input type="checkbox" id="update-check-enabled">
@@ -61,6 +65,9 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'enabled',
       'subs-age',
       'refresh-subs',
+      'sync-row',
+      'sync-now',
+      'sync-status',
       'check-update',
       'update-status',
       'update-check-enabled',
@@ -316,6 +323,119 @@ test('popup wires the Check for updates button to the manual checker', async () 
   await settleEvents();
 
   assert.equal(checks, 1);
+});
+
+test('popup hides the sync row when sync is disabled', async () => {
+  const sent = [];
+  const dependencies = popupDependencies({
+    sendMessage: async (message) => {
+      sent.push(message);
+      return { enabled: false };
+    },
+  });
+
+  await initializePopup(dependencies);
+
+  assert.deepEqual(sent, [{ type: 'sync-status' }]);
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-row').hidden,
+    true,
+  );
+});
+
+test('popup shows the sync row when sync is enabled', async () => {
+  const dependencies = popupDependencies({
+    sendMessage: async () => ({ enabled: true }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-row').hidden,
+    false,
+  );
+});
+
+test('popup Sync now sends sync-run and disables the button during the run', async () => {
+  const sent = [];
+  let finishSync;
+  const pendingSync = new Promise((resolve) => {
+    finishSync = resolve;
+  });
+  const dependencies = popupDependencies({
+    sendMessage: async (message) => {
+      sent.push(message);
+      if (message.type === 'sync-status') return { enabled: true };
+      return pendingSync;
+    },
+  });
+  await initializePopup(dependencies);
+  const button = dependencies.documentObject.getElementById('sync-now');
+
+  button.click();
+  assert.equal(button.disabled, true);
+  assert.deepEqual(sent, [
+    { type: 'sync-status' },
+    { type: 'sync-run' },
+  ]);
+
+  finishSync({ ok: true });
+  await settleEvents();
+  assert.equal(button.disabled, false);
+});
+
+test('popup renders a successful manual sync', async () => {
+  const dependencies = popupDependencies({
+    sendMessage: async (message) => (
+      message.type === 'sync-status'
+        ? { enabled: true }
+        : { ok: true }
+    ),
+  });
+  await initializePopup(dependencies);
+
+  dependencies.documentObject.getElementById('sync-now').click();
+  await settleEvents();
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-status').textContent,
+    'Sync complete.',
+  );
+});
+
+test('popup renders a manual sync error response', async () => {
+  const dependencies = popupDependencies({
+    sendMessage: async (message) => (
+      message.type === 'sync-status'
+        ? { enabled: true }
+        : { error: 'WebDAV unavailable' }
+    ),
+  });
+  await initializePopup(dependencies);
+
+  dependencies.documentObject.getElementById('sync-now').click();
+  await settleEvents();
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-status').textContent,
+    'WebDAV unavailable',
+  );
+});
+
+test('popup renders the last sync error from initial status', async () => {
+  const dependencies = popupDependencies({
+    sendMessage: async () => ({
+      enabled: true,
+      lastError: 'Previous WebDAV failure',
+    }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-status').textContent,
+    'Last sync error: Previous WebDAV failure',
+  );
 });
 
 test('popup refresh never calls window.confirm', async (t) => {

@@ -43,6 +43,33 @@ function renderUpdateCheckFailure(documentObject) {
   statusElement.hidden = false;
 }
 
+function errorMessage(error) {
+  if (typeof error === 'string') return error;
+  return error?.message || 'Sync failed';
+}
+
+export async function runSyncNow({
+  documentObject = document,
+  button = documentObject.getElementById('sync-now'),
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+} = {}) {
+  const statusElement = documentObject.getElementById('sync-status');
+  button.disabled = true;
+  try {
+    const response = await sendMessage({ type: 'sync-run' });
+    if (response?.ok !== true) {
+      throw new Error(errorMessage(response?.error));
+    }
+    statusElement.textContent = 'Sync complete.';
+    return true;
+  } catch (error) {
+    statusElement.textContent = errorMessage(error);
+    return false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 export function subscriptionAgeText(meta) {
   if (meta === null) {
     return 'Subscription list not collected yet - click to collect.';
@@ -179,6 +206,9 @@ export async function initializePopup({
   const updateButton = documentObject.getElementById('check-update');
   const dailyUpdateToggle =
     documentObject.getElementById('update-check-enabled');
+  const syncRow = documentObject.getElementById('sync-row');
+  const syncButton = documentObject.getElementById('sync-now');
+  const syncStatus = documentObject.getElementById('sync-status');
 
   let latestTag = null;
   if (config.updateCheck?.enabled === true) {
@@ -186,6 +216,17 @@ export async function initializePopup({
       latestTag = await loadAvailableUpdate();
     } catch {}
   }
+
+  syncRow.hidden = true;
+  try {
+    const status = await sendMessage({ type: 'sync-status' });
+    if (status?.enabled === true) {
+      syncRow.hidden = false;
+      if (status.lastError) {
+        syncStatus.textContent = `Last sync error: ${status.lastError}`;
+      }
+    }
+  } catch {}
 
   ageElement.textContent = subscriptionAgeText(meta);
   enabledToggle.checked = config.enabled;
@@ -213,6 +254,14 @@ export async function initializePopup({
     void manualUpdateChecker({
       documentObject,
       button: updateButton,
+    });
+  });
+
+  syncButton.addEventListener('click', () => {
+    void runSyncNow({
+      documentObject,
+      button: syncButton,
+      sendMessage,
     });
   });
 
