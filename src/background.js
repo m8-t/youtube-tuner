@@ -1,5 +1,8 @@
 import { loadConfig, onConfigChange } from './storage/config.js';
 import { loadSubs, loadSubsMeta } from './storage/subs.js';
+import { createSyncEngine } from './sync/engine.js';
+import * as syncKeyStore from './sync/key-store.js';
+import { createWebdavBackend } from './sync/webdav.js';
 import {
   UPDATE_CHECK_COMPLETE_MESSAGE,
   checkForUpdate,
@@ -8,6 +11,8 @@ import {
 
 const SUBS_ALARM = 'refresh-subs';
 const UPDATE_ALARM = 'check-update';
+export const SYNC_PUSH_ALARM = 'sync-push';
+export const SYNC_PULL_ALARM = 'sync-pull';
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const NORMAL_BADGE_COLOR = '#606060';
 export const STALE_BADGE_COLOR = '#B36B00';
@@ -272,26 +277,163 @@ export function createUpdateCheckRunner({
 
 const startUpdateCheck = createUpdateCheckRunner();
 
+const syncEngine = createSyncEngine({
+  storage: chrome.storage,
+  backendFactory: createWebdavBackend,
+  keyStore: syncKeyStore,
+});
+
+function syncFailure(error) {
+  if (
+    error?.authFailure === true
+    || error?.status === 401
+    || error?.status === 403
+  ) {
+    return 'WebDAV credentials were rejected';
+  }
+  return typeof error?.message === 'string' && error.message.length > 0
+    ? error.message
+    : 'Sync failed';
+}
+
+export async function ensureSyncPullAlarm({
+  alarms = chrome.alarms,
+} = {}) {
+  if (typeof alarms.get !== 'function') return false;
+  const existing = await alarms.get(SYNC_PULL_ALARM);
+  if (existing) return false;
+  alarms.create(SYNC_PULL_ALARM, { periodInMinutes: 1440 });
+  return true;
+}
+
+export function createSyncStorageChangeHandler({
+  storage = chrome.storage,
+  alarms = chrome.alarms,
+} = {}) {
+  return async function handleSyncStorageChange(changes, area) {
+    const keys = area === 'sync'
+      ? ['config', 'channelOverrides']
+      : area === 'local'
+        ? ['blocklist', 'manualSubs', 'watched']
+        : [];
+    if (!keys.some((key) => changes[key])) return false;
+
+    const stored = await storage.local.get(['syncSettings', 'syncMeta']);
+    if (stored.syncSettings?.enabled !== true) return false;
+    const meta = {
+      revision: null,
+      lastSyncAt: null,
+      lastError: null,
+      dirty: false,
+      ...(stored.syncMeta && typeof stored.syncMeta === 'object'
+        ? stored.syncMeta
+        : {}),
+    };
+    if (!meta.dirty) {
+      await storage.local.set({
+        syncMeta: { ...meta, dirty: true },
+      });
+    }
+
+    if (typeof alarms.get !== 'function') return true;
+    const pending = await alarms.get(SYNC_PUSH_ALARM);
+    if (!pending) {
+      alarms.create(SYNC_PUSH_ALARM, { delayInMinutes: 0.5 });
+    }
+    return true;
+  };
+}
+
+export function createSyncMessageHandler({
+  engine = syncEngine,
+  backendFactory = createWebdavBackend,
+} = {}) {
+  function capabilitiesFailure(error) {
+    return {
+      ok: false,
+      strongEtags: false,
+      cas: false,
+      authOk: !(
+        error?.authFailure === true
+        || error?.status === 401
+        || error?.status === 403
+      ),
+      failure: syncFailure(error),
+    };
+  }
+
+  return function handleSyncMessage(message, _sender, sendResponse) {
+    let operation;
+    if (message?.type === 'sync-status') {
+      operation = () => engine.status();
+    } else if (message?.type === 'sync-test') {
+      operation = async () => {
+        try {
+          return await backendFactory(message.settings ?? {}).test();
+        } catch (error) {
+          return capabilitiesFailure(error);
+        }
+      };
+    } else if (message?.type === 'sync-enable') {
+      operation = () => engine.enable(
+        message.settings ?? {},
+        message.passphrase,
+      );
+    } else if (message?.type === 'sync-disable') {
+      operation = () => engine.disable();
+    } else if (message?.type === 'sync-run') {
+      operation = () => engine.runSync({ force: true });
+    } else {
+      return undefined;
+    }
+
+    void Promise.resolve()
+      .then(operation)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: syncFailure(error) }));
+    return true;
+  };
+}
+
+const handleSyncStorageChange = createSyncStorageChangeHandler();
+const handleSyncMessage = createSyncMessageHandler();
+const startSyncPull = () => syncEngine.runSync();
+
 chrome.action.setPopup({ popup: POPUP_PATH });
 chrome.alarms.create(SUBS_ALARM, { periodInMinutes: 1440 });
 chrome.alarms.create(UPDATE_ALARM, { periodInMinutes: 1440 });
+void ensureSyncPullAlarm().catch((error) => {
+  warnRefreshFailure('sync-pull-alarm-create-failed', error);
+});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SUBS_ALARM) return startSubscriptionRefresh();
   if (alarm.name === UPDATE_ALARM) return startUpdateCheck();
+  if (alarm.name === SYNC_PUSH_ALARM) return syncEngine.runSync();
+  if (alarm.name === SYNC_PULL_ALARM) return startSyncPull();
   return undefined;
 });
 chrome.runtime.onInstalled.addListener(startSubscriptionRefresh);
 chrome.runtime.onInstalled.addListener(startUpdateCheck);
+chrome.runtime.onInstalled.addListener(startSyncPull);
 chrome.runtime.onStartup.addListener(startSubscriptionRefresh);
 chrome.runtime.onStartup.addListener(startUpdateCheck);
+chrome.runtime.onStartup.addListener(startSyncPull);
 
 onConfigChange(() => {
   void refreshSubscriptionIndicators();
 });
 
+chrome.storage.onChanged.addListener((changes, area) => {
+  void handleSyncStorageChange(changes, area).catch((error) => {
+    warnRefreshFailure('sync-change-schedule-failed', error);
+  });
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   subscriptionTabs.tabRemoved(tabId);
 });
+
+chrome.runtime.onMessage.addListener(handleSyncMessage);
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type !== 'counts') return;

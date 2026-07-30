@@ -121,10 +121,41 @@ function equalBytes(left, right) {
 }
 
 function requireAesKey(key) {
-  if (!(key instanceof CryptoKey) || key.type !== 'secret'
+  const CryptoKeyClass = globalThis.CryptoKey;
+  if (typeof CryptoKeyClass !== 'function'
+      || !(key instanceof CryptoKeyClass)
+      || key.type !== 'secret'
       || key.algorithm?.name !== 'AES-GCM') {
     throw new CryptoError('key must be an AES-GCM CryptoKey');
   }
+}
+
+export function parseHeader(blob) {
+  try {
+    const {
+      version,
+      kdf,
+      iters,
+      salt,
+    } = decodeHeader(bytes(blob, 'blob'));
+    return { version, kdf, iters, salt };
+  } catch (error) {
+    if (error instanceof CryptoError) throw error;
+    throw new CryptoError('Invalid envelope header', { cause: error });
+  }
+}
+
+export function attachKeyMetadata(key, salt, iters) {
+  requireAesKey(key);
+  const saltBytes = bytes(salt, 'salt');
+  if (saltBytes.length !== SALT_LENGTH) {
+    throw new CryptoError('PBKDF2 salt must be 32 bytes');
+  }
+  if (!Number.isSafeInteger(iters) || iters <= 0) {
+    throw new CryptoError('Invalid PBKDF2 iteration count');
+  }
+  keyMetadata.set(key, { salt: new Uint8Array(saltBytes), iters });
+  return key;
 }
 
 export async function deriveKey(passphrase, salt, iters = DEFAULT_ITERS) {
@@ -159,8 +190,7 @@ export async function deriveKey(passphrase, salt, iters = DEFAULT_ITERS) {
       false,
       ['encrypt', 'decrypt'],
     );
-    keyMetadata.set(key, { salt: saltBytes, iters });
-    return key;
+    return attachKeyMetadata(key, saltBytes, iters);
   } catch (error) {
     throw new CryptoError('Key derivation failed', { cause: error });
   }
