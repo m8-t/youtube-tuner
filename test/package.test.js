@@ -102,7 +102,8 @@ test('manifest and package versions stay in sync', async () => {
     readFile('manifest.json', 'utf8').then(JSON.parse),
     readFile('package.json', 'utf8').then(JSON.parse),
   ]);
-  assert.equal(manifest.version, packageJson.version);
-  assert.equal(manifest.version, '0.8.0');
+  assert.equal(packageJson.version, '0.9.0-beta.1');
+  assert.equal(manifest.version, '0.9.0.1');
+  assert.equal(manifest.version_name, packageJson.version);
   assert.deepEqual(manifest.host_permissions, ['*://*.youtube.com/*']);
 });

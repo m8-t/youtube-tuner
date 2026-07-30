@@ -26,6 +26,10 @@ this off.
 updates itself when you subscribe or unsubscribe. This also works for changes
 that you make on a different device.
 
+☁️ **Sync between devices (beta):** optional sync through your own WebDAV
+storage. The extension encrypts the data before upload. No accounts, no
+project servers.
+
 🌍 **Language support:** the German YouTube interface is verified. English has
 code, but its action labels are not verified. On all other languages, the
 extension falls back to safe behavior.
@@ -192,6 +196,53 @@ the blocklist instead.
 The channel rules use the channel display name, the same key as the
 blocklist. The rules are part of the synchronized settings.
 
+### Sync between devices (beta)
+
+The browsers that this extension targets have no Google account sync. The
+extension can synchronize its data through your own WebDAV storage instead.
+Nextcloud, mailbox.org, and most hosting providers offer WebDAV.
+
+The sync transfers the settings, the channel rules, the blocklist, the
+manual subscription entries, and the watched history. It does not transfer
+the collected subscription list; each device collects that list from YouTube
+itself.
+
+The extension encrypts the data with a passphrase before each upload
+(AES-256-GCM, key from PBKDF2 with 600000 iterations). The storage provider
+only sees an encrypted file. The passphrase is never stored and never
+uploaded. If you lose the passphrase, the remote data is not readable; sync
+must then start again with a new passphrase.
+
+Use this procedure on the first device:
+
+1. Create an app password in your WebDAV provider. Do not use the account
+   password.
+2. Open the extension options page, section **Sync**.
+3. Enter the full file URL for the sync data, for example
+   `https://cloud.example.com/remote.php/dav/files/USER/youtube-tuner.bin`.
+4. Enter the username, the app password, and a new passphrase.
+5. Select **Test connection**. The browser asks for permission for this
+   server. The test writes and deletes a probe file and reports if the
+   server supports safe concurrent writes. If the test fails, sync will not
+   enable.
+6. Select **Enable sync**.
+
+On each additional device, use the same procedure with the same URL and the
+same passphrase. An additional device adopts the server state when sync is
+enabled: the sync data on the server replaces the local settings, channel
+lists, and watched history of that device. Enable sync on your primary
+device first.
+
+After the setup, sync is automatic: a change uploads after a short delay,
+and each device pulls once per day and at each browser start. The **Sync
+now** button forces an immediate sync. Changes merge per item; a deletion on
+one device wins over an old entry on another device. A device that is
+offline for more than 90 days can bring a deleted entry back.
+
+**Disable sync** removes the server settings, the encryption key, and the
+sync state from the device. The local filter data stays. The settings export
+never contains the sync credentials or the sync state.
+
 ### Tile controls
 
 Each readable video tile has a **Not interested** control. This control tries
@@ -211,13 +262,17 @@ controls](assets/watch-page.jpg)
 ## Privacy and compatibility
 
 The extension has no analytics. It reads YouTube pages and uses the browser
-storage APIs. It does not send data to the project author. The only external
-call is the optional daily update check: one request to `api.github.com`
-that contains no personal data beyond your IP address. The toolbar menu has
-a switch that turns it off.
+storage APIs. It does not send data to the project author. There are two
+possible external calls. The first is the optional daily update check: one
+request to `api.github.com` that contains no personal data beyond your IP
+address. The toolbar menu has a switch that turns it off. The second is the
+optional sync: encrypted uploads to the WebDAV server that you configure
+yourself. Both are off unless you turn them on (the update check is on by
+default; the sync is off by default).
 
-The manifest requests `storage`, `alarms`, and access to `youtube.com`. It
-does not request other permissions. The update check needs no extra
+The manifest requests `storage`, `alarms`, and access to `youtube.com`. The
+sync feature asks for permission for your own WebDAV server only when you
+enable it. The extension requests no other permissions. The update check needs no extra
 permission because the GitHub API permits cross-origin requests.
 
 The text-dependent features have code for English and German. Live captures
@@ -246,6 +301,8 @@ blocklist rule can still hide the video.
 | Subscription cache and collection times | `local` |
 | Per-channel rule overrides | `sync` |
 | Update check time and newest release tag | `local` |
+| Sync document, sync state, and WebDAV settings | `local` |
+| Sync encryption key (non-extractable) | IndexedDB |
 
 The watched set contains a maximum of 5000 video IDs. If a new ID exceeds this
 limit, the extension removes the oldest ID.
@@ -254,8 +311,10 @@ Your browser can sync the filter configuration because the extension uses
 `storage.sync`. The extension keeps the channel lists and watched IDs in
 `storage.local`.
 
-The settings export contains all data from both storage areas. An import
-replaces each storage area that is present in the import file.
+The settings export contains all data from both storage areas, except the
+sync document, the sync state, and the WebDAV settings. An import replaces
+each storage area that is present in the import file and ignores those sync
+keys.
 
 ## Architecture
 
@@ -277,6 +336,9 @@ src/
     styles.js  empty-sections.js  starvation.js
   locale/             age and view parsing, EN and DE
   storage/            config + overrides (sync); blocklist, watched, subs (local)
+  sync/               cross-device sync: clocked document, LWW merge,
+                      AES-GCM envelope, WebDAV backend with CAS probe,
+                      engine with diff capture, IndexedDB key store
   subs-refresh.js     subscription collection loop
   subs-scrape.js      channel-name extraction from the page
   subs-capture.js     subscribe, unsubscribe, and reconcile on /watch
