@@ -9,7 +9,7 @@
       legend { font-weight: 600; padding: 0 .4em; }
       label { display: block; margin: .4em 0; }
       input[type="number"] { width: 7em; }
-      input[type="text"] { box-sizing: border-box; width: 100%; }
+      input[type="text"], input[type="url"], input[type="password"] { box-sizing: border-box; width: 100%; }
       textarea { box-sizing: border-box; min-height: 9em; width: 100%; }
       table { border-collapse: collapse; margin: .6em 0; width: 100%; }
       th, td { border-bottom: 1px solid #eee; padding: .4em; text-align: left; vertical-align: top; }
@@ -91,6 +91,42 @@
       <ul id="blocklist"></ul>
       <p class="status" id="blocklist-empty">No channels blocked yet.
         Hover a video and click the 🚫 button.</p>
+    </fieldset>
+
+    <fieldset id="sync-settings">
+      <legend>Sync</legend>
+      <table>
+        <tbody>
+          <tr>
+            <th><label for="sync-url">Server URL</label></th>
+            <td><input type="url" id="sync-url" placeholder="https://cloud.example.com/remote.php/dav/files/USER/youtube-tuner.bin"></td>
+          </tr>
+          <tr>
+            <th><label for="sync-username">Username</label></th>
+            <td><input type="text" id="sync-username"></td>
+          </tr>
+          <tr>
+            <th><label for="sync-password">App password</label></th>
+            <td>
+              <input type="password" id="sync-password">
+              <span class="status">use an app password, not the account password</span>
+            </td>
+          </tr>
+          <tr>
+            <th><label for="sync-passphrase">Passphrase</label></th>
+            <td>
+              <input type="password" id="sync-passphrase">
+              <span class="status">encrypts your data, never stored or uploaded, needed on every device</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <button id="sync-test" type="button">Test connection</button>
+      <button id="sync-enable" type="button">Enable sync</button>
+      <button id="sync-disable" type="button" hidden disabled>Disable sync</button>
+      <button id="sync-run" type="button" hidden>Sync now</button>
+      <p class="status" id="sync-status"></p>
+      <p class="status" id="sync-message"></p>
     </fieldset>
 
     <fieldset>

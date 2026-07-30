@@ -11,6 +11,7 @@
   },
   "permissions": ["storage", "alarms"],
   "host_permissions": ["*://*.youtube.com/*"],
+  "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "dist/background.js" },
   "content_scripts": [
     {

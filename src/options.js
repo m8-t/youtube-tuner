@@ -19,6 +19,7 @@ export const SETTINGS_FORMAT = 1;
 const MANUAL_REFRESH_TIMEOUT_SECONDS = MANUAL_REFRESH_TIMEOUT_MS / 1000;
 const SUBS_SCRAPE_BUDGET_SECONDS = SUBS_SCRAPE_BUDGET_MS / 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SYNC_LOCAL_KEYS = new Set(['syncDoc', 'syncMeta', 'syncSettings']);
 
 const REFRESH_FAILURE_MESSAGES = {
   'no-youtube-tab':
@@ -347,8 +348,299 @@ export async function setupOverridesEditor() {
   el('override-add').addEventListener('click', addOverrideRow);
 }
 
+export function validateSyncUrl(value) {
+  const url = typeof value === 'string' ? value.trim() : '';
+  if (!url) throw new Error('Server URL is required');
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Server URL is invalid');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Server URL must use https://');
+  }
+  if (!parsed.pathname || parsed.pathname === '/') {
+    throw new Error('Server URL must include a file path');
+  }
+  if (parsed.pathname.endsWith('/')) {
+    throw new Error('Server URL path must not end with /');
+  }
+  return {
+    origin: `${parsed.origin}/*`,
+    url: parsed.href,
+  };
+}
+
+function syncFormValues() {
+  const { origin, url } = validateSyncUrl(el('sync-url').value);
+  return {
+    origin,
+    passphrase: el('sync-passphrase').value,
+    settings: {
+      url,
+      username: el('sync-username').value,
+      password: el('sync-password').value,
+    },
+  };
+}
+
+function errorMessage(error) {
+  if (typeof error === 'string') return error;
+  return error?.message || 'Unknown error';
+}
+
+function formatLastSync(value) {
+  if (value === null || value === undefined || value === '') return 'never';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+export function renderSyncStatus(status = {}, settings = {}) {
+  const configuredSettings = settings || {};
+  el('sync-url').value =
+    typeof configuredSettings.url === 'string' ? configuredSettings.url : '';
+  el('sync-username').value =
+    typeof configuredSettings.username === 'string'
+      ? configuredSettings.username
+      : '';
+  el('sync-password').value =
+    typeof configuredSettings.password === 'string'
+      ? configuredSettings.password
+      : '';
+  el('sync-passphrase').value = '';
+
+  const enabled = status.enabled === true;
+  el('sync-enable').hidden = enabled;
+  el('sync-enable').disabled = enabled;
+  el('sync-disable').hidden = !enabled;
+  el('sync-disable').disabled = !enabled;
+  el('sync-run').hidden = !enabled;
+  el('sync-run').disabled = !enabled;
+
+  const lastSync = status.configured === false
+    ? 'never'
+    : formatLastSync(status.lastSyncAt);
+  let text =
+    `Sync ${enabled ? 'enabled' : 'disabled'}. ` +
+    `Last sync: ${lastSync}.`;
+  if (status.lastError) text += ` Last error: ${status.lastError}.`;
+  el('sync-status').textContent = text;
+}
+
+export async function refreshSyncStatus({
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+  localStorage = chrome.storage.local,
+} = {}) {
+  const [status, stored] = await Promise.all([
+    sendMessage({ type: 'sync-status' }),
+    localStorage.get('syncSettings'),
+  ]);
+  const settings = stored.syncSettings || status?.settings || {};
+  renderSyncStatus(status, settings);
+  return status;
+}
+
+async function requestSyncPermission(requestPermission) {
+  const values = syncFormValues();
+  const granted = await requestPermission({ origins: [values.origin] });
+  if (!granted) {
+    el('sync-message').textContent = 'Permission denied';
+    return null;
+  }
+  return values;
+}
+
+export function formatSyncCapabilities(capabilities = {}) {
+  const auth = capabilities.authOk === true
+    ? 'ok'
+    : capabilities.authOk === false
+      ? 'failed'
+      : 'unknown';
+  const strongEtags = capabilities.strongEtags === true
+    ? 'yes'
+    : capabilities.strongEtags === false
+      ? 'no'
+      : 'unknown';
+  const cas = capabilities.cas === true
+    ? 'yes'
+    : capabilities.cas === false
+      ? 'no'
+      : 'unknown';
+  let text =
+    `Auth: ${auth}. Strong ETags: ${strongEtags}. CAS: ${cas}.`;
+  if (capabilities.failure) text += ` Failure: ${capabilities.failure}.`;
+  return text;
+}
+
+export async function testSyncConnection({
+  button = el('sync-test'),
+  requestPermission =
+    (request) => chrome.permissions.request(request),
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+} = {}) {
+  button.disabled = true;
+  try {
+    const values = await requestSyncPermission(requestPermission);
+    if (values === null) return null;
+    const response = await sendMessage({
+      type: 'sync-test',
+      settings: values.settings,
+    });
+    if (response?.error && !response.capabilities) {
+      throw new Error(errorMessage(response.error));
+    }
+    const capabilities = response?.capabilities || response || {};
+    el('sync-message').textContent =
+      formatSyncCapabilities(capabilities);
+    return capabilities;
+  } catch (error) {
+    el('sync-message').textContent =
+      `Connection test failed: ${errorMessage(error)}`;
+    return null;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+export async function enableSync({
+  button = el('sync-enable'),
+  requestPermission =
+    (request) => chrome.permissions.request(request),
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+  localStorage = chrome.storage.local,
+} = {}) {
+  button.disabled = true;
+  let enabled = false;
+  try {
+    const values = await requestSyncPermission(requestPermission);
+    if (values === null) return false;
+    const response = await sendMessage({
+      type: 'sync-enable',
+      settings: values.settings,
+      passphrase: values.passphrase,
+    });
+    if (response?.ok !== true) {
+      throw new Error(errorMessage(response?.error || 'Sync could not be enabled'));
+    }
+    el('sync-passphrase').value = '';
+    el('sync-message').textContent = 'Sync enabled.';
+    enabled = true;
+    return true;
+  } catch (error) {
+    el('sync-message').textContent =
+      `Enable failed: ${errorMessage(error)}`;
+    return false;
+  } finally {
+    button.disabled = false;
+    if (enabled) {
+      try {
+        await refreshSyncStatus({ sendMessage, localStorage });
+      } catch (error) {
+        el('sync-message').textContent =
+          `Status refresh failed: ${errorMessage(error)}`;
+      }
+    }
+  }
+}
+
+export async function disableSync({
+  button = el('sync-disable'),
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+  localStorage = chrome.storage.local,
+} = {}) {
+  button.disabled = true;
+  let disabled = false;
+  try {
+    const response = await sendMessage({ type: 'sync-disable' });
+    if (response?.error) throw new Error(errorMessage(response.error));
+    el('sync-message').textContent = 'Sync disabled.';
+    disabled = true;
+    return true;
+  } catch (error) {
+    el('sync-message').textContent =
+      `Disable failed: ${errorMessage(error)}`;
+    return false;
+  } finally {
+    button.disabled = false;
+    if (disabled) {
+      try {
+        await refreshSyncStatus({ sendMessage, localStorage });
+      } catch (error) {
+        el('sync-message').textContent =
+          `Status refresh failed: ${errorMessage(error)}`;
+      }
+    }
+  }
+}
+
+export async function runSyncNow({
+  button = el('sync-run'),
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+} = {}) {
+  button.disabled = true;
+  try {
+    const response = await sendMessage({ type: 'sync-run' });
+    if (response?.ok !== true) {
+      throw new Error(errorMessage(response?.error || 'Sync failed'));
+    }
+    el('sync-message').textContent = 'Sync complete.';
+    return true;
+  } catch (error) {
+    el('sync-message').textContent =
+      `Sync failed: ${errorMessage(error)}`;
+    return false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+export async function setupSyncControls({
+  requestPermission =
+    (request) => chrome.permissions.request(request),
+  sendMessage = (message) => chrome.runtime.sendMessage(message),
+  localStorage = chrome.storage.local,
+} = {}) {
+  el('sync-test').addEventListener('click', async () => {
+    await testSyncConnection({ requestPermission, sendMessage });
+  });
+  el('sync-enable').addEventListener('click', async () => {
+    await enableSync({ requestPermission, sendMessage, localStorage });
+  });
+  el('sync-disable').addEventListener('click', async () => {
+    await disableSync({ sendMessage, localStorage });
+  });
+  el('sync-run').addEventListener('click', async () => {
+    await runSyncNow({ sendMessage });
+  });
+
+  try {
+    return await refreshSyncStatus({ sendMessage, localStorage });
+  } catch (error) {
+    el('sync-message').textContent =
+      `Status unavailable: ${errorMessage(error)}`;
+    return null;
+  }
+}
+
 function isStorageObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function excludeSyncLocalValues(values) {
+  return Object.fromEntries(
+    Object.entries(values)
+      .filter(([key]) => !SYNC_LOCAL_KEYS.has(key)),
+  );
+}
+
+function preserveSyncLocalValues(values, previous) {
+  const replacement = { ...values };
+  for (const key of SYNC_LOCAL_KEYS) {
+    if (Object.hasOwn(previous, key)) replacement[key] = previous[key];
+  }
+  return replacement;
 }
 
 function validateSettingsFile(settings) {
@@ -421,10 +713,11 @@ export async function exportSettings({
   button.disabled = true;
   try {
     const exportedAt = now().toISOString();
-    const [local, sync] = await Promise.all([
+    const [storedLocal, sync] = await Promise.all([
       localStorage.get(null),
       syncStorage.get(null),
     ]);
+    const local = excludeSyncLocalValues(storedLocal);
     const settings = {
       format: SETTINGS_FORMAT,
       exportedAt,
@@ -488,7 +781,11 @@ export async function importSettings({
 
     const replacements = [];
     if (hasLocal) {
-      replacements.push({ storageArea: localStorage, values: settings.local });
+      replacements.push({
+        preserveSyncLocal: true,
+        storageArea: localStorage,
+        values: excludeSyncLocalValues(settings.local),
+      });
     }
     if (hasSync) {
       replacements.push({ storageArea: syncStorage, values: settings.sync });
@@ -496,16 +793,30 @@ export async function importSettings({
     const previousValues = await Promise.all(
       replacements.map(({ storageArea }) => storageArea.get(null)),
     );
+    const replacementValues = replacements.map(
+      ({ preserveSyncLocal, values }, index) =>
+        preserveSyncLocal
+          ? preserveSyncLocalValues(values, previousValues[index])
+          : values,
+    );
     try {
       await Promise.all(replacements.map(
-        ({ storageArea, values }, index) =>
-          replaceStorageArea(storageArea, values, previousValues[index]),
+        ({ storageArea }, index) =>
+          replaceStorageArea(
+            storageArea,
+            replacementValues[index],
+            previousValues[index],
+          ),
       ));
     } catch (error) {
       try {
         await Promise.all(replacements.map(
-          ({ storageArea, values }, index) =>
-            replaceStorageArea(storageArea, previousValues[index], values),
+          ({ storageArea }, index) =>
+            replaceStorageArea(
+              storageArea,
+              previousValues[index],
+              replacementValues[index],
+            ),
         ));
       } catch {}
       throw error;
@@ -593,6 +904,7 @@ async function main() {
     renderStatus(),
     renderManualSubs(),
     setupOverridesEditor(),
+    setupSyncControls(),
   ]);
 
   for (const [id] of FIELDS) el(id).addEventListener('change', persist);
