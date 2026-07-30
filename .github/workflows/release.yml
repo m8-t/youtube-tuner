@@ -32,9 +32,20 @@ jobs:
         run: |
           set -e
           VERSION=$(node -p "require('./manifest.json').version")
+          VERSION_NAME=$(node -p "require('./manifest.json').version_name || ''")
           TAG=${GITHUB_REF#refs/tags/}
           TAG_VERSION=${TAG#v}
-          if [ "$VERSION" != "$TAG_VERSION" ]; then
+          EXPECTED_VERSION=$TAG_VERSION
+          case "$TAG_VERSION" in
+            *-beta.*)
+              EXPECTED_VERSION=$(printf '%s' "$TAG_VERSION" | sed 's/-beta\././')
+              if [ "$VERSION_NAME" != "$TAG_VERSION" ]; then
+                echo "Manifest version_name does not match beta release tag." >&2
+                exit 1
+              fi
+              ;;
+          esac
+          if [ "$VERSION" != "$EXPECTED_VERSION" ]; then
             echo "Manifest version does not match release tag." >&2
             exit 1
           fi
@@ -59,4 +70,8 @@ jobs:
         run: |
           set -e
           TAG=${GITHUB_REF#refs/tags/}
-          gh release create "$TAG" youtube-tuner-*.zip youtube-tuner-*.crx --title "Release $TAG" --generate-notes
+          PRERELEASE=()
+          case "$TAG" in
+            v*-beta.*) PRERELEASE=(--prerelease) ;;
+          esac
+          gh release create "$TAG" youtube-tuner-*.zip youtube-tuner-*.crx --title "Release $TAG" --generate-notes "${PRERELEASE[@]}"
