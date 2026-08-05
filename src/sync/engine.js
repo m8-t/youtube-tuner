@@ -275,6 +275,16 @@ export function createSyncEngine({
     );
   }
 
+  function demoteSnapshotClocks(doc) {
+    const fields = ['configFields', 'overrides', 'blocklist', 'manualSubs'];
+    for (const field of fields) {
+      for (const entry of Object.values(doc[field])) {
+        entry.clock = createClock(0, entry.clock.counter, doc.actorId);
+      }
+    }
+    return doc;
+  }
+
   async function capture(timestamp = timestampFrom(now)) {
     const [privateState, projectedState] = await Promise.all([
       readPrivateState(),
@@ -516,7 +526,12 @@ export function createSyncEngine({
       doc = normalizeDocument(privateState.doc);
       if (remote !== null) doc = merge(doc, remote, timestamp);
     } else if (remote !== null) {
-      doc = remote;
+      const snapshot = storageSnapshotToDoc(
+        projectedState,
+        undefined,
+        timestamp,
+      );
+      doc = merge(demoteSnapshotClocks(snapshot), remote, timestamp);
     } else {
       doc = storageSnapshotToDoc(projectedState, undefined, timestamp);
     }

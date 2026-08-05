@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { DEFAULT_CONFIG } from '../src/rules/defaults.js';
 import { createSyncEngine } from '../src/sync/engine.js';
 import { decrypt, deriveKey, encrypt } from '../src/sync/crypto.js';
-import { createClock, setConfigField } from '../src/sync/document.js';
+import {
+  createClock,
+  setBlocklistEntry,
+  setConfigField,
+} from '../src/sync/document.js';
 import { createKeyStore } from '../src/sync/key-store.js';
 import { storageToDoc } from '../src/sync/project.js';
 import { ConflictError } from '../src/sync/webdav.js';
@@ -497,17 +501,62 @@ test('runSync records an error after exhausting conflict retries', async () => {
   assert.equal(storage.values.local.syncMeta.dirty, true);
 });
 
-test('bootstrap adopts a remote document or creates one from storage', async () => {
+test('bootstrap keeps local-only fields while remote config conflicts win', async () => {
   const remote = storageToDoc(
-    { ...DEFAULT_CONFIG, enabled: false },
+    { enabled: false },
     {},
-    ['Remote Block'],
+    [],
     [],
     [],
     'remote-actor',
     NOW - 1,
   );
-  const adoptStorage = fakeStorage({
+  const storage = fakeStorage({
+    sync: {
+      config: {
+        ...copy(DEFAULT_CONFIG),
+        enabled: true,
+        localOnly: 'device-2',
+      },
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+    },
+  });
+  const merged = await makeEngine({
+    storage,
+    backend: {},
+  }).bootstrap(remote);
+
+  assert.equal(merged.configFields.enabled.value, false);
+  assert.equal(merged.configFields.enabled.clock.ts, NOW - 1);
+  assert.equal(merged.configFields.localOnly.value, 'device-2');
+  assert.equal(merged.configFields.localOnly.clock.ts, 0);
+  assert.equal(storage.values.sync.config.enabled, false);
+  assert.equal(storage.values.sync.config.localOnly, 'device-2');
+  assert.equal(storage.values.local.syncMeta.dirty, true);
+});
+
+test('bootstrap lets a remote tombstone remove a local blocklist entry', async () => {
+  const remote = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    ['Local Block'],
+    [],
+    [],
+    'remote-actor',
+    NOW - 100,
+  );
+  setBlocklistEntry(
+    remote,
+    'Local Block',
+    false,
+    createClock(NOW - 1, 100, 'remote-actor'),
+  );
+  const storage = fakeStorage({
     sync: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
@@ -518,13 +567,54 @@ test('bootstrap adopts a remote document or creates one from storage', async () 
       watched: [],
     },
   });
-  const adopted = await makeEngine({
-    storage: adoptStorage,
-    backend: {},
-  }).bootstrap(remote);
-  assert.deepEqual(adopted, remote);
-  assert.equal(adoptStorage.values.sync.config.enabled, false);
-  assert.deepEqual(adoptStorage.values.local.blocklist, ['Remote Block']);
+
+  const merged = await makeEngine({ storage, backend: {} }).bootstrap(remote);
+
+  assert.equal(merged.blocklist['Local Block'].present, false);
+  assert.equal(merged.blocklist['Local Block'].clock.ts, NOW - 1);
+  assert.deepEqual(storage.values.local.blocklist, []);
+});
+
+test('bootstrap unions watched entries using their real snapshot recency', async () => {
+  const remote = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    ['remote-video', 'shared-video'],
+    'remote-actor',
+    NOW - 20,
+  );
+  remote.clearedBefore = NOW - 30;
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: ['local-video', 'shared-video'],
+    },
+  });
+
+  const merged = await makeEngine({ storage, backend: {} }).bootstrap(remote);
+
+  assert.deepEqual(Object.keys(merged.watched), [
+    'local-video',
+    'remote-video',
+    'shared-video',
+  ]);
+  assert.equal(merged.watched['local-video'].lastSeen, NOW - 1);
+  assert.equal(merged.watched['shared-video'].lastSeen, NOW);
+  assert.deepEqual(storage.values.local.watched, [
+    'remote-video',
+    'local-video',
+    'shared-video',
+  ]);
+});
+
+test('bootstrap creates a document from storage when remote is empty', async () => {
 
   const localStorage = fakeStorage({
     sync: {
@@ -546,15 +636,95 @@ test('bootstrap adopts a remote document or creates one from storage', async () 
   assert.ok(localDoc.watched['local-video']);
 });
 
-test('enable derives an existing remote key from its envelope header', async () => {
+test('enable uploads the conservative union and marks bootstrap dirty', async () => {
+  const salt = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const key = await encryptionKey('correct passphrase', salt);
+  const remoteDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    ['Remote Block'],
+    [],
+    [],
+    'remote-actor',
+    NOW - 1,
+  );
+  const blob = await encrypt(remoteDoc, key);
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {
+        'Local Channel': { watched: { enabled: false } },
+      },
+    },
+    local: {
+      blocklist: ['Local Block'],
+      manualSubs: ['Local Channel'],
+      watched: [],
+    },
+  });
+  let reads = 0;
+  let uploaded;
+  const backend = {
+    async test() {
+      return CAPABILITIES;
+    },
+    async read() {
+      reads += 1;
+      if (reads === 2) {
+        assert.equal(storage.values.local.syncMeta.dirty, true);
+        assert.deepEqual(
+          new Set(storage.values.local.blocklist),
+          new Set(['Local Block', 'Remote Block']),
+        );
+      }
+      return { blob, revision: '"remote"' };
+    },
+    async write(nextBlob) {
+      uploaded = await decrypt(nextBlob, key);
+      return '"merged"';
+    },
+  };
+
+  assert.deepEqual(
+    await makeEngine({ storage, backend }).enable(
+      SETTINGS,
+      'correct passphrase',
+    ),
+    { ok: true },
+  );
+  assert.equal(reads, 2);
+  assert.equal(uploaded.blocklist['Local Block'].present, true);
+  assert.equal(uploaded.blocklist['Local Block'].clock.ts, 0);
+  assert.equal(uploaded.blocklist['Remote Block'].present, true);
+  assert.equal(uploaded.manualSubs['Local Channel'].present, true);
+  assert.deepEqual(
+    uploaded.overrides['Local Channel'].value,
+    { watched: { enabled: false } },
+  );
+  const localClocks = [
+    uploaded.blocklist['Local Block'].clock,
+    uploaded.manualSubs['Local Channel'].clock,
+    uploaded.overrides['Local Channel'].clock,
+  ];
+  assert.equal(new Set(localClocks.map(({ actorId }) => actorId)).size, 1);
+  assert.equal(new Set(localClocks.map(({ counter }) => counter)).size, 3);
+  assert.ok(localClocks.every(({ ts }) => ts === 0));
+  assert.deepEqual(
+    new Set(storage.values.local.blocklist),
+    new Set(['Local Block', 'Remote Block']),
+  );
+  assert.deepEqual(storage.values.local.manualSubs, ['Local Channel']);
+});
+
+test('fresh-profile enable preserves the remote projection', async () => {
   const salt = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
   const remoteKey = await encryptionKey('correct passphrase', salt);
   const remoteDoc = storageToDoc(
     { ...DEFAULT_CONFIG, enabled: false },
-    {},
-    [],
-    [],
-    [],
+    { 'Remote Channel': { watched: { enabled: false } } },
+    ['Remote Block'],
+    ['Remote Channel'],
+    ['remote-video'],
     'remote-actor',
     NOW - 1,
   );
@@ -592,6 +762,16 @@ test('enable derives an existing remote key from its envelope header', async () 
   assert.equal(keys.record.iters, 1000);
   assert.deepEqual(await decrypt(blob, keys.record.key), remoteDoc);
   assert.equal(storage.values.local.syncSettings.enabled, true);
+  assert.deepEqual(storage.values.sync.config, {
+    ...DEFAULT_CONFIG,
+    enabled: false,
+  });
+  assert.deepEqual(storage.values.sync.channelOverrides, {
+    'Remote Channel': { watched: { enabled: false } },
+  });
+  assert.deepEqual(storage.values.local.blocklist, ['Remote Block']);
+  assert.deepEqual(storage.values.local.manualSubs, ['Remote Channel']);
+  assert.deepEqual(storage.values.local.watched, ['remote-video']);
 });
 
 test('decrypt error preserves projected user data and records a safe error', async () => {

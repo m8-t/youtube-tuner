@@ -233,10 +233,12 @@ Use this procedure on the first device:
 6. Select **Enable sync**.
 
 On each additional device, use the same procedure with the same URL and the
-same passphrase. An additional device adopts the server state when sync is
-enabled: the sync data on the server replaces the local settings, channel
-lists, and watched history of that device. Enable sync on your primary
-device first.
+same passphrase. An additional device merges its existing data with the
+server state when sync is enabled: entries that exist only on that device
+(blocked channels, overrides, manual subscriptions, watched history) are
+kept and uploaded. Where both sides differ directly, for example a setting
+with a different value or a channel that was deliberately removed on another
+device, the server copy wins.
 
 After the setup, sync is automatic: a change uploads after a short delay,
 and each device pulls once per day and at each browser start. The **Sync
