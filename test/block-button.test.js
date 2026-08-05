@@ -63,6 +63,35 @@ test('block button fires the native action and unconditional local block write',
   assert.deepEqual(blocked, ['Some Channel']);
 });
 
+test('a rejected block write warns with the channel name and never throws', async (t) => {
+  const doc = html(tile('a', 'video1', 'Some Channel'));
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  t.after(() => {
+    console.warn = originalWarn;
+  });
+  attachBlockButtons({
+    root: doc.body,
+    tileSelector: TILE_SELECTOR,
+    readTile,
+    onBlock: async () => {
+      throw new Error('storage rejected');
+    },
+    onNativeAction: () => {},
+    doc,
+  });
+
+  assert.doesNotThrow(() => {
+    doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(warnings, [[
+    '[youtube-tuner] block failed for "Some Channel" — storage write rejected; if this tab predates an extension update, reload it',
+  ]]);
+});
+
 test('clicking the block button arms its tile with the channel name', () => {
   const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
   run();

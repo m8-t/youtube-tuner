@@ -6,6 +6,16 @@ export const NOT_INTERESTED_BUTTON_CLASS = 'ytt-not-interested';
 
 const nativeUndoArms = new WeakMap();
 
+function warnBlockFailure(channelName) {
+  try {
+    console.warn(
+      `[youtube-tuner] block failed for "${channelName}" — storage write rejected; if this tab predates an extension update, reload it`,
+    );
+  } catch {
+    // Logging failures must not escape into YouTube's click handler.
+  }
+}
+
 export function armNativeUndo(tile, channelName) {
   try {
     if (!tile || !channelName) return false;
@@ -118,9 +128,12 @@ export function attachBlockButtons({
           // The local block below is intentionally independent of this call.
         }
         try {
-          Promise.resolve(onBlock(channelName)).catch(() => {});
+          Promise.resolve(onBlock(channelName)).catch(() => {
+            warnBlockFailure(channelName);
+          });
         } catch {
           // A synchronous storage failure must not escape the click handler.
+          warnBlockFailure(channelName);
         }
         try {
           registry.arm(element, channelName);

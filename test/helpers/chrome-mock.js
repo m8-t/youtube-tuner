@@ -4,12 +4,17 @@ export function installChromeMock({ install = true } = {}) {
   const events = {
     alarm: [],
     clicked: [],
+    connected: [],
     installed: [],
     message: [],
     removed: [],
     startup: [],
   };
   const alarmCreates = [];
+  const ports = [];
+  const runtimeCalls = { connect: [] };
+  const scriptingCalls = [];
+  const tabQueries = [];
   const actionCalls = {
     popups: [],
   };
@@ -17,6 +22,10 @@ export function installChromeMock({ install = true } = {}) {
   const makeEvent = (name) => ({
     addListener(fn) {
       events[name].push(fn);
+    },
+    removeListener(fn) {
+      const index = events[name].indexOf(fn);
+      if (index !== -1) events[name].splice(index, 1);
     },
   });
 
@@ -51,7 +60,13 @@ export function installChromeMock({ install = true } = {}) {
     storage: {
       sync: makeArea('sync'),
       local: makeArea('local'),
-      onChanged: { addListener: (fn) => listeners.push(fn) },
+      onChanged: {
+        addListener: (fn) => listeners.push(fn),
+        removeListener(fn) {
+          const index = listeners.indexOf(fn);
+          if (index !== -1) listeners.splice(index, 1);
+        },
+      },
     },
     action: {
       onClicked: makeEvent('clicked'),
@@ -69,9 +84,33 @@ export function installChromeMock({ install = true } = {}) {
       onAlarm: makeEvent('alarm'),
     },
     runtime: {
+      id: 'youtube-tuner-test-extension',
+      connect(options) {
+        runtimeCalls.connect.push(options);
+        const disconnectListeners = [];
+        const port = {
+          name: options?.name,
+          onDisconnect: {
+            addListener(fn) {
+              disconnectListeners.push(fn);
+            },
+            removeListener(fn) {
+              const index = disconnectListeners.indexOf(fn);
+              if (index !== -1) disconnectListeners.splice(index, 1);
+            },
+          },
+          disconnect() {
+            for (const fn of [...disconnectListeners]) fn(port);
+          },
+        };
+        ports.push(port);
+        for (const fn of events.connected) fn(port);
+        return port;
+      },
       getManifest() {
         return { version: '0.7.0' };
       },
+      onConnect: makeEvent('connected'),
       onInstalled: makeEvent('installed'),
       onMessage: makeEvent('message'),
       onStartup: makeEvent('startup'),
@@ -80,13 +119,19 @@ export function installChromeMock({ install = true } = {}) {
       async create() {
         return { id: 1 };
       },
-      async query() {
+      async query(options) {
+        tabQueries.push(options);
         return [];
       },
       async remove() {},
       async sendMessage() {},
       async update() {},
       onRemoved: makeEvent('removed'),
+    },
+    scripting: {
+      async executeScript(options) {
+        scriptingCalls.push(options);
+      },
     },
   };
   if (install) globalThis.chrome = chromeMock;
@@ -97,6 +142,10 @@ export function installChromeMock({ install = true } = {}) {
     areas,
     chrome: chromeMock,
     events,
+    ports,
+    runtimeCalls,
+    scriptingCalls,
+    tabQueries,
     reset() {
       areas.sync = {};
       areas.local = {};

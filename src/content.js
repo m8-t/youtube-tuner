@@ -4,12 +4,7 @@ import { readTile, isOutermostTile, TILE_SELECTOR } from './dom/tile-adapter.js'
 import { createApplier } from './dom/applier.js';
 import { injectStyles } from './dom/styles.js';
 import { collapseEmptySections } from './dom/empty-sections.js';
-import {
-  attachBlockButtons,
-  BLOCK_BUTTON_CLASS,
-  BLOCK_HOST_CLASS,
-  NOT_INTERESTED_BUTTON_CLASS,
-} from './dom/block-button.js';
+import { attachBlockButtons } from './dom/block-button.js';
 import { createNativeUndoWatcher } from './dom/native-undo.js';
 import { createStarvationNudge } from './dom/starvation.js';
 import { loadConfig, onConfigChange } from './storage/config.js';
@@ -34,6 +29,9 @@ import { DEFAULT_CONFIG } from './rules/defaults.js';
 
 export const SUBS_COLLECT_HASH = '#ytt-collect';
 export const SUBS_COLLECTION_RESULT_MESSAGE = 'subs-collection-result';
+export const LIFELINE_PORT_NAME = 'ytt-lifeline';
+export const LIFELINE_RECONNECT_DELAY_MS = 1_000;
+export const LIFELINE_MAX_RECONNECT_DELAY_MS = 30_000;
 
 let config = DEFAULT_CONFIG;
 let state = {
@@ -47,6 +45,131 @@ let state = {
 let nudge;
 let filtering;
 let passiveSubscriptionCollection = null;
+let contentTeardown = null;
+
+export function createRuntimeLifeline({
+  runtime = globalThis.chrome?.runtime,
+  onInvalidated = () => {},
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+  reconnectDelayMs = LIFELINE_RECONNECT_DELAY_MS,
+  maxReconnectDelayMs = LIFELINE_MAX_RECONNECT_DELAY_MS,
+} = {}) {
+  let port = null;
+  let reconnectTimer = null;
+  let retryDelayMs = reconnectDelayMs;
+  let stopped = false;
+
+  function runtimeIsValid() {
+    try {
+      return typeof runtime?.id === 'string' && runtime.id.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  function invalidate() {
+    if (stopped) return;
+    stopped = true;
+    if (reconnectTimer !== null) {
+      try {
+        clearTimeoutFn(reconnectTimer);
+      } catch {}
+      reconnectTimer = null;
+    }
+    port = null;
+    try {
+      onInvalidated();
+    } catch {
+      // An orphan must never throw teardown failures into the page.
+    }
+  }
+
+  function scheduleReconnect() {
+    if (stopped || reconnectTimer !== null) return;
+    const delay = retryDelayMs;
+    retryDelayMs = Math.min(retryDelayMs * 2, maxReconnectDelayMs);
+    try {
+      reconnectTimer = setTimeoutFn(() => {
+        reconnectTimer = null;
+        if (stopped) return;
+        if (!runtimeIsValid()) {
+          invalidate();
+          return;
+        }
+        connect();
+      }, delay);
+    } catch {
+      // Losing the retry timer must not affect the host page.
+    }
+  }
+
+  function handleDisconnect() {
+    port = null;
+    if (stopped) return;
+    if (!runtimeIsValid()) {
+      invalidate();
+      return;
+    }
+    retryDelayMs = reconnectDelayMs;
+    scheduleReconnect();
+  }
+
+  function connect() {
+    if (stopped) return false;
+    if (!runtimeIsValid()) {
+      invalidate();
+      return false;
+    }
+    try {
+      const nextPort = runtime.connect({ name: LIFELINE_PORT_NAME });
+      if (typeof nextPort?.onDisconnect?.addListener !== 'function') {
+        throw new Error('lifeline port has no disconnect event');
+      }
+      nextPort.onDisconnect.addListener(handleDisconnect);
+      port = nextPort;
+      retryDelayMs = reconnectDelayMs;
+      return true;
+    } catch {
+      port = null;
+      if (!runtimeIsValid()) {
+        invalidate();
+      } else {
+        scheduleReconnect();
+      }
+      return false;
+    }
+  }
+
+  function start() {
+    try {
+      return connect();
+    } catch {
+      return false;
+    }
+  }
+
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    if (reconnectTimer !== null) {
+      try {
+        clearTimeoutFn(reconnectTimer);
+      } catch {}
+      reconnectTimer = null;
+    }
+    const currentPort = port;
+    port = null;
+    try {
+      currentPort?.onDisconnect?.removeListener?.(handleDisconnect);
+    } catch {}
+    try {
+      currentPort?.disconnect?.();
+    } catch {}
+  }
+
+  return { start, stop };
+}
 
 export function isSupportedRoute(pathname) {
   return pathname === '/' || pathname === '/watch';
@@ -133,19 +256,20 @@ function onNavigate() {
   filtering.sync();
 }
 
-function removeContentArtifacts(doc = document) {
-  for (const button of doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`)) {
-    button.remove();
+export function removeContentArtifacts(doc = document) {
+  for (const button of doc.querySelectorAll('button[class*="ytt-"]')) {
+    if ([...button.classList].some((name) => name.startsWith('ytt-'))) {
+      button.remove();
+    }
   }
-  for (const button of doc.querySelectorAll(
-    `.${NOT_INTERESTED_BUTTON_CLASS}`,
-  )) {
-    button.remove();
+  for (const element of doc.querySelectorAll('[class*="ytt-"]')) {
+    for (const className of [...element.classList]) {
+      if (className.startsWith('ytt-')) element.classList.remove(className);
+    }
   }
-  for (const host of doc.querySelectorAll(`.${BLOCK_HOST_CLASS}`)) {
-    host.classList.remove(BLOCK_HOST_CLASS);
+  for (const style of doc.querySelectorAll('style[id^="ytt-"]')) {
+    style.remove();
   }
-  doc.getElementById('ytt-styles')?.remove();
 }
 
 export function createFilteringLifecycle({
@@ -357,6 +481,45 @@ async function main({
   collectMarker = false,
   initialPathname = location.pathname,
 } = {}) {
+  // A newly injected copy shares the page DOM with any orphaned copy.
+  try { removeContentArtifacts(document); } catch {}
+
+  let capture = null;
+  let onNavigation = null;
+  let onStorageChange = null;
+  let onRuntimeMessage = null;
+  let lifeline = null;
+  let tornDown = false;
+  const teardown = () => {
+    if (tornDown) return;
+    tornDown = true;
+    try { lifeline?.stop(); } catch {}
+    try { capture?.stop(); } catch {}
+    try { passiveSubscriptionCollection?.stop(); } catch {}
+    passiveSubscriptionCollection = null;
+    try { filtering?.stop(); } catch {}
+    try {
+      if (onNavigation) {
+        window.removeEventListener('yt-navigate-finish', onNavigation);
+      }
+    } catch {}
+    try {
+      if (onStorageChange) {
+        chrome.storage.onChanged.removeListener?.(onStorageChange);
+      }
+    } catch {}
+    try {
+      if (onRuntimeMessage) {
+        chrome.runtime.onMessage.removeListener?.(onRuntimeMessage);
+      }
+    } catch {}
+    try { removeContentArtifacts(document); } catch {}
+  };
+  contentTeardown = teardown;
+  lifeline = createRuntimeLifeline({ onInvalidated: teardown });
+  lifeline.start();
+  if (tornDown) return;
+
   state.locale = detectLocale(document);
   nudge = createStarvationNudge({
     scrollBy: () => window.scrollBy({
@@ -374,7 +537,8 @@ async function main({
   });
 
   config = await loadConfig();
-  const capture = createSubscribeCapture({
+  if (tornDown) return;
+  capture = createSubscribeCapture({
     documentObject: document,
     getPathname: () => location.pathname,
     getEnabled: () => config.enabled,
@@ -384,6 +548,7 @@ async function main({
   });
   capture.start();
   const fetchedSubs = await refreshState();
+  if (tornDown) return;
 
   filtering.sync();
   recordCurrentVideo();
@@ -416,6 +581,10 @@ async function main({
     })
       .then((started) => {
         if (started?.mode !== 'passive') return;
+        if (tornDown) {
+          try { started.controller?.stop(); } catch {}
+          return;
+        }
         passiveSubscriptionCollection = started.controller;
         passiveSubscriptionCollection = stopPassiveCollectionOnNavigation(
           passiveSubscriptionCollection,
@@ -429,26 +598,35 @@ async function main({
         );
       });
   };
-  window.addEventListener('yt-navigate-finish', () => {
+  onNavigation = () => {
+    if (tornDown) return;
     onNavigate();
     capture.reconcile();
     updatePassiveCollection();
-  });
+  };
+  window.addEventListener('yt-navigate-finish', onNavigation);
 
   onConfigChange((next) => {
+    if (tornDown) return;
     config = next;
     filtering.sync();
   });
 
-  chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (!hasStateStorageChange(changes, area)) return;
-    await refreshState();
-    filtering.scan();
-  });
+  onStorageChange = async (changes, area) => {
+    try {
+      if (tornDown || !hasStateStorageChange(changes, area)) return;
+      await refreshState();
+      if (!tornDown) filtering.scan();
+    } catch {
+      // Storage refresh failures must not escape into the page.
+    }
+  };
+  chrome.storage.onChanged.addListener(onStorageChange);
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === 'rescan') filtering.scan();
-  });
+  onRuntimeMessage = (message) => {
+    if (!tornDown && message?.type === 'rescan') filtering.scan();
+  };
+  chrome.runtime.onMessage.addListener(onRuntimeMessage);
 
   if (collectMarker && initialPathname === '/feed/channels') {
     void startSubscriptionCollectionMode({
@@ -492,10 +670,16 @@ if (typeof window !== 'undefined') {
   startContentScript(window, () => {
     void main({ collectMarker, initialPathname }).catch((error) => {
       // Fail-open: a partial setup must not leave any video hidden.
-      filtering?.stop();
-      passiveSubscriptionCollection?.stop();
-      removeContentArtifacts();
-      console.error('[youtube-tuner] setup failed, filtering disabled', error);
+      try { contentTeardown?.(); } catch {}
+      try { filtering?.stop(); } catch {}
+      try { passiveSubscriptionCollection?.stop(); } catch {}
+      try { removeContentArtifacts(); } catch {}
+      try {
+        console.error(
+          '[youtube-tuner] setup failed, filtering disabled',
+          error,
+        );
+      } catch {}
     });
   });
 }

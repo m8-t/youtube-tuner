@@ -116,6 +116,41 @@ test('background permanently attaches the popup and has no click handler', () =>
   assert.deepEqual(mock.events.clicked, []);
 });
 
+test('install and update re-inject content into every open YouTube tab', async (t) => {
+  const queries = [];
+  const injections = [];
+  const originalQuery = chrome.tabs.query;
+  const originalExecuteScript = chrome.scripting.executeScript;
+  chrome.tabs.query = async (options) => {
+    queries.push(options);
+    return [{ id: 41 }, { id: 42 }, { id: null }];
+  };
+  chrome.scripting.executeScript = async (options) => {
+    injections.push(options);
+    if (options.target.tabId === 41) throw new Error('closed tab');
+  };
+  t.after(() => {
+    chrome.tabs.query = originalQuery;
+    chrome.scripting.executeScript = originalExecuteScript;
+  });
+
+  const listener = mock.events.installed.at(-1);
+  assert.equal(mock.events.connected.length, 1);
+  assert.equal(await listener({ reason: 'update' }), 1);
+  assert.equal(await listener({ reason: 'install' }), 1);
+
+  assert.deepEqual(queries, [
+    { url: '*://www.youtube.com/*' },
+    { url: '*://www.youtube.com/*' },
+  ]);
+  assert.deepEqual(injections, [
+    { target: { tabId: 41 }, files: ['dist/content.js'] },
+    { target: { tabId: 42 }, files: ['dist/content.js'] },
+    { target: { tabId: 41 }, files: ['dist/content.js'] },
+    { target: { tabId: 42 }, files: ['dist/content.js'] },
+  ]);
+});
+
 test('fresh subscription cache needs no foreground collection tab', async () => {
   await chrome.storage.local.set({
     subs: {

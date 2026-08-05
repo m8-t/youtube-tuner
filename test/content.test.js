@@ -2,9 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { html } from './helpers/dom.js';
 import {
+  LIFELINE_PORT_NAME,
+  LIFELINE_RECONNECT_DELAY_MS,
   SUBS_COLLECTION_RESULT_MESSAGE,
   createDomHealthCanary,
   createFilteringLifecycle,
+  createRuntimeLifeline,
   hasStateStorageChange,
   isSupportedRoute,
   startContentScript,
@@ -84,6 +87,53 @@ function assertCleanFilteringPage(doc) {
   assert.equal(doc.querySelectorAll('#ytt-styles').length, 0);
 }
 
+function createRuntimeHarness() {
+  const ports = [];
+  const connectCalls = [];
+  const runtime = {
+    id: 'test-extension-id',
+    connect(options) {
+      connectCalls.push(options);
+      const disconnectListeners = new Set();
+      const port = {
+        onDisconnect: {
+          addListener(listener) {
+            disconnectListeners.add(listener);
+          },
+          removeListener(listener) {
+            disconnectListeners.delete(listener);
+          },
+        },
+        disconnect() {
+          disconnectListeners.clear();
+        },
+        fireDisconnect() {
+          for (const listener of [...disconnectListeners]) listener(port);
+        },
+      };
+      ports.push(port);
+      return port;
+    },
+  };
+  return { connectCalls, ports, runtime };
+}
+
+function createTimerHarness() {
+  const scheduled = [];
+  return {
+    scheduled,
+    setTimeoutFn(callback, delay) {
+      const timer = { callback, delay };
+      scheduled.push(timer);
+      return timer;
+    },
+    clearTimeoutFn(timer) {
+      const index = scheduled.indexOf(timer);
+      if (index !== -1) scheduled.splice(index, 1);
+    },
+  };
+}
+
 test('filtering routes are exactly the home feed and watch page', () => {
   assert.equal(isSupportedRoute('/'), true);
   assert.equal(isSupportedRoute('/watch'), true);
@@ -109,6 +159,81 @@ test('content state refreshes for local state and sync channel overrides', () =>
     hasStateStorageChange({ channelOverrides: {} }, 'local'),
     false,
   );
+});
+
+test('valid runtime lifeline disconnect reconnects without teardown', (t) => {
+  const watcherCalls = [];
+  const { doc, lifecycle } = setupFilteringLifecycle({
+    nativeUndoWatcher: {
+      start() { watcherCalls.push('start'); },
+      stop() { watcherCalls.push('stop'); },
+    },
+  });
+  lifecycle.sync();
+  const runtimeHarness = createRuntimeHarness();
+  const timerHarness = createTimerHarness();
+  let teardowns = 0;
+  const lifeline = createRuntimeLifeline({
+    runtime: runtimeHarness.runtime,
+    onInvalidated() {
+      teardowns += 1;
+      lifecycle.stop();
+    },
+    setTimeoutFn: timerHarness.setTimeoutFn,
+    clearTimeoutFn: timerHarness.clearTimeoutFn,
+  });
+  t.after(() => {
+    lifeline.stop();
+    lifecycle.stop();
+  });
+
+  assert.equal(lifeline.start(), true);
+  runtimeHarness.ports[0].fireDisconnect();
+
+  assert.equal(teardowns, 0);
+  assert.deepEqual(watcherCalls, ['start']);
+  assert.ok(doc.querySelector(`.${HIDDEN_CLASS}`));
+  assert.equal(timerHarness.scheduled.length, 1);
+  assert.equal(
+    timerHarness.scheduled[0].delay,
+    LIFELINE_RECONNECT_DELAY_MS,
+  );
+
+  timerHarness.scheduled.shift().callback();
+  assert.deepEqual(runtimeHarness.connectCalls, [
+    { name: LIFELINE_PORT_NAME },
+    { name: LIFELINE_PORT_NAME },
+  ]);
+  assert.equal(teardowns, 0);
+  assert.ok(doc.querySelector(`.${HIDDEN_CLASS}`));
+});
+
+test('invalidated runtime lifeline fully tears down filtering', () => {
+  const watcherCalls = [];
+  const { doc, lifecycle } = setupFilteringLifecycle({
+    nativeUndoWatcher: {
+      start() { watcherCalls.push('start'); },
+      stop() { watcherCalls.push('stop'); },
+    },
+  });
+  lifecycle.sync();
+  const runtimeHarness = createRuntimeHarness();
+  const timerHarness = createTimerHarness();
+  const lifeline = createRuntimeLifeline({
+    runtime: runtimeHarness.runtime,
+    onInvalidated: () => lifecycle.stop(),
+    setTimeoutFn: timerHarness.setTimeoutFn,
+    clearTimeoutFn: timerHarness.clearTimeoutFn,
+  });
+  lifeline.start();
+
+  runtimeHarness.runtime.id = undefined;
+  runtimeHarness.ports[0].fireDisconnect();
+
+  assert.deepEqual(watcherCalls, ['start', 'stop']);
+  assert.equal(lifecycle.active, false);
+  assert.equal(timerHarness.scheduled.length, 0);
+  assertCleanFilteringPage(doc);
 });
 
 test('navigating from home to results tears down every content artifact', (t) => {

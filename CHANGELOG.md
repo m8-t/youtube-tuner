@@ -3,6 +3,17 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.4.0] - 2026-08-05
+
+### Added
+
+- Re-injection into open YouTube tabs after an extension install or update.
+- Stale button and filtering-artifact cleanup during content-script startup.
+
+### Fixed
+
+- Rejected block writes now emit a `console.warn` instead of failing silently.
+
 ## [1.3.0] - 2026-08-05
 
 ### Added

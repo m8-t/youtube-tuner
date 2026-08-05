@@ -22,6 +22,41 @@ export const SUBS_COLLECTION_RESULT_MESSAGE = 'subs-collection-result';
 export const CANCEL_SUBS_REFRESH_MESSAGE = 'cancel-subs-refresh';
 export const POPUP_PATH = 'popup.html';
 
+export async function reinjectContentScripts({
+  tabs = chrome.tabs,
+  scripting = chrome.scripting,
+} = {}) {
+  let youtubeTabs;
+  try {
+    youtubeTabs = await tabs.query({ url: '*://www.youtube.com/*' });
+  } catch {
+    return 0;
+  }
+
+  const injections = youtubeTabs
+    .filter((tab) => Number.isInteger(tab?.id))
+    .map(async (tab) => {
+      try {
+        await scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['dist/content.js'],
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const results = await Promise.all(injections);
+  return results.filter(Boolean).length;
+}
+
+export function handleInstalledReinjection(details) {
+  if (details?.reason !== 'install' && details?.reason !== 'update') {
+    return undefined;
+  }
+  return reinjectContentScripts();
+}
+
 function warnRefreshFailure(reason, error) {
   if (error === undefined) {
     console.warn(`[youtube-tuner] ${reason}`);
@@ -469,6 +504,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onInstalled.addListener(startSubscriptionRefresh);
 chrome.runtime.onInstalled.addListener(startUpdateCheck);
 chrome.runtime.onInstalled.addListener(startSyncPull);
+chrome.runtime.onInstalled.addListener(handleInstalledReinjection);
+chrome.runtime.onConnect.addListener(() => {});
 chrome.runtime.onStartup.addListener(startSubscriptionRefresh);
 chrome.runtime.onStartup.addListener(startUpdateCheck);
 chrome.runtime.onStartup.addListener(startSyncPull);
