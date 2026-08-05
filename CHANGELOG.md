@@ -3,7 +3,7 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
-## 1.0.0 - unreleased
+## 1.0.0 - 2026-08-05
 
 ### Added
 
@@ -34,6 +34,9 @@ Notable changes per release. Older releases are documented on the
 ### Changed
 
 - Enable/disable settings use toggle switches instead of checkboxes.
+- Buttons have a refreshed look in both themes: rounded corners, palette
+  borders, an elevated surface tone in dark mode, and hover and pressed
+  states.
 
 ### Fixed
 
