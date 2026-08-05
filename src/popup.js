@@ -225,6 +225,7 @@ export async function initializePopup({
   setBadgeText = (options) => chrome.action.setBadgeText(options),
   manualUpdateChecker = createManualUpdateChecker(),
   sendMessage = (message) => chrome.runtime.sendMessage(message),
+  openOptionsPage = () => chrome.runtime.openOptionsPage(),
   closePopup = () => window.close(),
   now = Date.now,
 } = {}) {
@@ -241,6 +242,7 @@ export async function initializePopup({
   const syncRow = documentObject.getElementById('sync-row');
   const syncButton = documentObject.getElementById('sync-now');
   const syncStatus = documentObject.getElementById('sync-status');
+  const optionsButton = documentObject.getElementById('open-options');
 
   let latestTag = null;
   if (config.updateCheck?.enabled === true) {
@@ -288,6 +290,17 @@ export async function initializePopup({
       documentObject,
       button: updateButton,
     });
+  });
+
+  optionsButton.addEventListener('click', () => {
+    try {
+      const response = openOptionsPage();
+      void Promise.resolve(response).catch((error) => {
+        console.warn('[youtube-tuner] opening options failed', error);
+      });
+    } finally {
+      closePopup();
+    }
   });
 
   syncButton.addEventListener('click', () => {

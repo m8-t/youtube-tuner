@@ -4,22 +4,139 @@
     <meta charset="utf-8">
     <title>youtube-tuner</title>
     <style>
-      body { font: 14px/1.5 system-ui, sans-serif; max-width: 42em; margin: 2em auto; padding: 0 1em; }
-      fieldset { border: 1px solid #ccc; border-radius: 6px; margin: 0 0 1.2em; padding: .8em 1em; }
+      :root {
+        --color-scheme: light;
+        --bg-color: #fff;
+        --text-color: #000;
+        --muted-text-color: #666;
+        --panel-bg: transparent;
+        --button-bg: #f0f0f0;
+        --button-hover-bg: #e5e5e5;
+        --button-text: #000;
+        --input-bg: #fff;
+        --input-text: #000;
+        --control-border: #767676;
+        --fieldset-border: #ccc;
+        --row-border: #eee;
+        --link-color: #0000ee;
+        --focus-color: #06c;
+        --toggle-bg: #767676;
+        --toggle-checked-bg: #1670d2;
+        --toggle-thumb: #fff;
+        color-scheme: var(--color-scheme);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --color-scheme: dark;
+          --bg-color: #202124;
+          --text-color: #f1f3f4;
+          --muted-text-color: #bdc1c6;
+          --panel-bg: #292a2d;
+          --button-bg: #3c4043;
+          --button-hover-bg: #4a4e52;
+          --button-text: #f1f3f4;
+          --input-bg: #303134;
+          --input-text: #f1f3f4;
+          --control-border: #777b80;
+          --fieldset-border: #5f6368;
+          --row-border: #45484d;
+          --link-color: #8ab4f8;
+          --focus-color: #8ab4f8;
+          --toggle-bg: #5f6368;
+          --toggle-checked-bg: #8ab4f8;
+          --toggle-thumb: #fff;
+        }
+      }
+      body {
+        background: var(--bg-color);
+        color: var(--text-color);
+        font: 14px/1.5 system-ui, sans-serif;
+        max-width: 42em;
+        margin: 2em auto;
+        padding: 0 1em;
+      }
+      fieldset {
+        background: var(--panel-bg);
+        border: 1px solid var(--fieldset-border);
+        border-radius: 6px;
+        margin: 0 0 1.2em;
+        padding: .8em 1em;
+      }
       legend { font-weight: 600; padding: 0 .4em; }
       label { display: block; margin: .4em 0; }
       input[type="number"] { width: 7em; }
       input[type="text"], input[type="url"], input[type="password"] { box-sizing: border-box; width: 100%; }
       textarea { box-sizing: border-box; min-height: 9em; width: 100%; }
+      input[type="number"],
+      input[type="text"],
+      input[type="url"],
+      input[type="password"],
+      select,
+      textarea {
+        background: var(--input-bg);
+        border-color: var(--control-border);
+        color: var(--input-text);
+      }
       table { border-collapse: collapse; margin: .6em 0; width: 100%; }
-      th, td { border-bottom: 1px solid #eee; padding: .4em; text-align: left; vertical-align: top; }
+      th, td { border-bottom: 1px solid var(--row-border); padding: .4em; text-align: left; vertical-align: top; }
       th { font-weight: 600; }
       td label { margin: 0; }
       .override-limit { display: block; margin-top: .25em; }
       ul { list-style: none; padding: 0; }
-      li { display: flex; justify-content: space-between; padding: .25em 0; border-bottom: 1px solid #eee; }
-      .status { color: #666; font-size: .9em; }
-      button { cursor: pointer; }
+      li { display: flex; justify-content: space-between; padding: .25em 0; border-bottom: 1px solid var(--row-border); }
+      a { color: var(--link-color); }
+      small, .status { color: var(--muted-text-color); }
+      .status { font-size: .9em; }
+      button {
+        background: var(--button-bg);
+        border-color: var(--control-border);
+        color: var(--button-text);
+        cursor: pointer;
+      }
+      button:hover { background: var(--button-hover-bg); }
+      input[type="checkbox"] {
+        appearance: none;
+        background: var(--toggle-bg);
+        border: 1px solid var(--control-border);
+        border-radius: 999px;
+        box-sizing: border-box;
+        cursor: pointer;
+        display: inline-flex;
+        height: 1.5em;
+        margin: 0 .4em 0 0;
+        padding: .15em;
+        transition: background-color .15s ease;
+        vertical-align: middle;
+        width: 2.5em;
+      }
+      input[type="checkbox"]::before {
+        background: var(--toggle-thumb);
+        border-radius: 50%;
+        content: "";
+        height: 1em;
+        transform: translateX(0);
+        transition: transform .15s ease;
+        width: 1em;
+      }
+      input[type="checkbox"]:checked {
+        background: var(--toggle-checked-bg);
+      }
+      input[type="checkbox"]:checked::before {
+        transform: translateX(1em);
+      }
+      input[type="checkbox"]:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible,
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--focus-color);
+        outline-offset: 2px;
+      }
+      input[type="checkbox"]:disabled {
+        cursor: not-allowed;
+        opacity: .55;
+      }
     </style>
   </head>
   <body>

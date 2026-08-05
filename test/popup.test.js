@@ -24,6 +24,7 @@ function popupDocument() {
     <button id="check-update" type="button">Check for updates</button>
     <p id="update-status" hidden></p>
     <input type="checkbox" id="update-check-enabled">
+    <button id="open-options" type="button">Options</button>
   `);
 }
 
@@ -45,6 +46,7 @@ function popupDependencies(overrides = {}) {
     setBadgeText: () => {},
     manualUpdateChecker: async () => {},
     sendMessage: async () => ({}),
+    openOptionsPage: async () => {},
     closePopup: () => {},
     ...overrides,
   };
@@ -73,6 +75,7 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'check-update',
       'update-status',
       'update-check-enabled',
+      'open-options',
     ],
   );
 });
@@ -325,6 +328,26 @@ test('popup wires the Check for updates button to the manual checker', async () 
   await settleEvents();
 
   assert.equal(checks, 1);
+});
+
+test('popup Options button opens the options page and closes the popup', async () => {
+  let opened = 0;
+  let closed = 0;
+  const dependencies = popupDependencies({
+    openOptionsPage: async () => {
+      opened += 1;
+    },
+    closePopup: () => {
+      closed += 1;
+    },
+  });
+  await initializePopup(dependencies);
+
+  dependencies.documentObject.getElementById('open-options').click();
+  await settleEvents();
+
+  assert.equal(opened, 1);
+  assert.equal(closed, 1);
 });
 
 test('popup hides the sync row when sync is disabled', async () => {

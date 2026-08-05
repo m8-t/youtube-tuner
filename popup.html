@@ -4,17 +4,106 @@
     <meta charset="utf-8">
     <title>youtube-tuner</title>
     <style>
+      :root {
+        --color-scheme: light;
+        --bg-color: #fff;
+        --text-color: #000;
+        --muted-text-color: #555;
+        --button-bg: #f0f0f0;
+        --button-hover-bg: #e5e5e5;
+        --button-text: #000;
+        --control-border: #767676;
+        --separator-color: #ddd;
+        --link-color: #0000ee;
+        --focus-color: #06c;
+        --toggle-bg: #767676;
+        --toggle-checked-bg: #1670d2;
+        --toggle-thumb: #fff;
+        color-scheme: var(--color-scheme);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --color-scheme: dark;
+          --bg-color: #202124;
+          --text-color: #f1f3f4;
+          --muted-text-color: #bdc1c6;
+          --button-bg: #3c4043;
+          --button-hover-bg: #4a4e52;
+          --button-text: #f1f3f4;
+          --control-border: #777b80;
+          --separator-color: #5f6368;
+          --link-color: #8ab4f8;
+          --focus-color: #8ab4f8;
+          --toggle-bg: #5f6368;
+          --toggle-checked-bg: #8ab4f8;
+          --toggle-thumb: #fff;
+        }
+      }
       body {
+        background: var(--bg-color);
+        color: var(--text-color);
         font: 14px/1.5 system-ui, sans-serif;
         margin: 0;
         padding: 1em;
         width: 19em;
       }
       p { margin: 0 0 .8em; }
-      button { cursor: pointer; margin-bottom: .8em; }
+      button {
+        background: var(--button-bg);
+        border-color: var(--control-border);
+        color: var(--button-text);
+        cursor: pointer;
+        margin-bottom: .8em;
+      }
+      button:hover { background: var(--button-hover-bg); }
       label { display: block; margin-bottom: .8em; }
-      hr { border: 0; border-top: 1px solid #ddd; margin: 1em 0; }
-      .explanation { color: #555; }
+      hr {
+        border: 0;
+        border-top: 1px solid var(--separator-color);
+        margin: 1em 0;
+      }
+      a { color: var(--link-color); }
+      small, .explanation { color: var(--muted-text-color); }
+      input[type="checkbox"] {
+        appearance: none;
+        background: var(--toggle-bg);
+        border: 1px solid var(--control-border);
+        border-radius: 999px;
+        box-sizing: border-box;
+        cursor: pointer;
+        display: inline-flex;
+        height: 1.5em;
+        margin: 0 .4em 0 0;
+        padding: .15em;
+        transition: background-color .15s ease;
+        vertical-align: middle;
+        width: 2.5em;
+      }
+      input[type="checkbox"]::before {
+        background: var(--toggle-thumb);
+        border-radius: 50%;
+        content: "";
+        height: 1em;
+        transform: translateX(0);
+        transition: transform .15s ease;
+        width: 1em;
+      }
+      input[type="checkbox"]:checked {
+        background: var(--toggle-checked-bg);
+      }
+      input[type="checkbox"]:checked::before {
+        transform: translateX(1em);
+      }
+      input[type="checkbox"]:focus-visible,
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--focus-color);
+        outline-offset: 2px;
+      }
+      input[type="checkbox"]:disabled {
+        cursor: not-allowed;
+        opacity: .55;
+      }
     </style>
   </head>
   <body>
@@ -39,6 +128,10 @@
     <p id="update-status" hidden></p>
     <label><input type="checkbox" id="update-check-enabled">
       Check for updates once per day (asks api.github.com)</label>
+
+    <hr>
+
+    <button id="open-options" type="button">Options</button>
 
     <script src="dist/popup.js"></script>
   </body>

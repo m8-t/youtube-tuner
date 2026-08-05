@@ -160,7 +160,9 @@ A click on the toolbar icon opens the control menu. The menu has the filter
 on/off switch, the subscription-list status with a refresh button, the
 **Check for updates** button, and the daily update check switch. When sync
 is enabled, the menu also has a **Sync now** button, the time of the last
-sync, and the last sync error if one exists.
+sync, and the last sync error if one exists. The **Options** button opens
+the options page. The popup and the options page follow the system light
+or dark theme.
 
 Use the options page to set the limits, edit channel lists, clear the watched
 history, and export or import settings.
