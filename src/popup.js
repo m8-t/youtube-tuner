@@ -1,5 +1,6 @@
 import { loadConfig, saveConfig } from './storage/config.js';
 import { loadSubsMeta } from './storage/subs.js';
+import { friendlySyncError } from './sync/friendly-errors.js';
 import {
   UPDATE_CHECK_COMPLETE_MESSAGE,
   checkForUpdate,
@@ -46,8 +47,16 @@ function renderUpdateCheckFailure(documentObject) {
 }
 
 function errorMessage(error) {
-  if (typeof error === 'string') return error;
-  return error?.message || 'Sync failed';
+  return friendlySyncError(error, 'Sync failed');
+}
+
+async function loadHelpDismissed(localStorage) {
+  try {
+    const stored = await localStorage.get('helpDismissed');
+    return stored.helpDismissed === true;
+  } catch {
+    return false;
+  }
 }
 
 export function lastSyncText(lastSyncAt, {
@@ -108,7 +117,11 @@ export function subscriptionAgeText(meta) {
 
   const ageDays = Math.floor(Math.max(0, meta.ageMs) / DAY_MS);
   const dayLabel = ageDays === 1 ? 'day' : 'days';
-  return `Subscription list is ${ageDays} ${dayLabel} old.`;
+  const staleExplanation = meta.stale === true
+    ? ' The amber badge means it needs a refresh.'
+    : '';
+  return `Subscription list is ${ageDays} ${dayLabel} old.` +
+    staleExplanation;
 }
 
 export function requestSubscriptionRefresh({
@@ -227,11 +240,13 @@ export async function initializePopup({
   sendMessage = (message) => chrome.runtime.sendMessage(message),
   openOptionsPage = () => chrome.runtime.openOptionsPage(),
   closePopup = () => window.close(),
+  localStorage = chrome.storage.local,
   now = Date.now,
 } = {}) {
-  const [meta, config] = await Promise.all([
+  const [meta, config, helpDismissed] = await Promise.all([
     loadMeta(),
     loadConfiguration(),
+    loadHelpDismissed(localStorage),
   ]);
   const ageElement = documentObject.getElementById('subs-age');
   const refreshButton = documentObject.getElementById('refresh-subs');
@@ -244,6 +259,12 @@ export async function initializePopup({
   const syncStatus = documentObject.getElementById('sync-status');
   const domHealthStatus = documentObject.getElementById('dom-health-status');
   const optionsButton = documentObject.getElementById('open-options');
+  const helpPanel = documentObject.getElementById('help-panel');
+  const helpDismissButton = documentObject.getElementById('help-dismiss');
+  const helpToggle = documentObject.getElementById('help-toggle');
+
+  helpPanel.hidden = helpDismissed;
+  helpToggle.hidden = !helpDismissed;
 
   let latestTag = null;
   if (config.updateCheck?.enabled === true) {
@@ -257,7 +278,8 @@ export async function initializePopup({
     const status = await sendMessage({ type: 'sync-status' });
     if (status?.domHealth === 'degraded') {
       domHealthStatus.textContent =
-        'Filtering may be broken by a YouTube page change';
+        'Filtering may be broken by a YouTube page change. ' +
+        'Try reloading the YouTube tab.';
       domHealthStatus.hidden = false;
     } else {
       domHealthStatus.textContent = '';
@@ -267,7 +289,8 @@ export async function initializePopup({
       syncRow.hidden = false;
       renderLastSync(status.lastSyncAt, documentObject, now);
       if (status.lastError) {
-        syncStatus.textContent = `Last sync error: ${status.lastError}`;
+        syncStatus.textContent =
+          `Last sync error: ${errorMessage(status.lastError)}`;
       }
     }
   } catch {}
@@ -276,6 +299,20 @@ export async function initializePopup({
   enabledToggle.checked = config.enabled;
   dailyUpdateToggle.checked = config.updateCheck?.enabled === true;
   renderAvailableUpdate(latestTag, { documentObject });
+
+  helpDismissButton.addEventListener('click', () => {
+    try {
+      const saved = localStorage.set({ helpDismissed: true });
+      void Promise.resolve(saved).catch(() => {});
+    } catch {}
+    helpPanel.hidden = true;
+    helpToggle.hidden = false;
+  });
+
+  helpToggle.addEventListener('click', (event) => {
+    event.preventDefault();
+    helpPanel.hidden = !helpPanel.hidden;
+  });
 
   enabledToggle.addEventListener('change', () => {
     void setFilteringEnabled({

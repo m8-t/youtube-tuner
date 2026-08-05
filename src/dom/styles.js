@@ -3,6 +3,8 @@ import {
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
+  TOAST_CLASS,
+  TOAST_UNDO_CLASS,
 } from './block-button.js';
 import { COLLAPSED_SECTION_CLASS } from './empty-sections.js';
 
@@ -34,6 +36,22 @@ export function injectStyles(doc) {
     }
     .${BLOCK_BUTTON_CLASS}:hover { background: rgba(200,0,0,.9); }
     .${NOT_INTERESTED_BUTTON_CLASS}:hover { background: rgba(70,70,70,.95); }
+    .${TOAST_CLASS} {
+      position: fixed; left: 24px; bottom: 80px; z-index: 9999;
+      display: flex; align-items: center; gap: 16px;
+      border-radius: 6px; padding: 12px 16px;
+      background: rgba(0,0,0,.88); color: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,.35);
+      font: 14px/1.4 Roboto, Arial, sans-serif;
+    }
+    .${TOAST_UNDO_CLASS} {
+      border: none; padding: 0; cursor: pointer;
+      background: transparent; color: #fff;
+      font: inherit; font-weight: 600; text-decoration: underline;
+    }
+    .${TOAST_UNDO_CLASS}:focus-visible {
+      outline: 2px solid #fff; outline-offset: 3px;
+    }
   `;
   doc.head.appendChild(style);
 }

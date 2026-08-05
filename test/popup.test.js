@@ -7,6 +7,7 @@ import {
   createManualUpdateChecker,
   initializePopup,
   requestSubscriptionRefresh,
+  subscriptionAgeText,
 } from '../src/popup.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -14,6 +15,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function popupDocument() {
   return html(`
     <input type="checkbox" id="enabled">
+    <section id="help-panel">
+      <p>Help copy</p>
+      <button id="help-dismiss" type="button">Got it</button>
+    </section>
     <small id="dom-health-status" class="status-line" hidden></small>
     <p id="subs-age"></p>
     <button id="refresh-subs" type="button">Refresh now</button>
@@ -26,6 +31,7 @@ function popupDocument() {
     <p id="update-status" hidden></p>
     <input type="checkbox" id="update-check-enabled">
     <button id="open-options" type="button">Options</button>
+    <a id="help-toggle" href="#" hidden>Help</a>
   `);
 }
 
@@ -49,6 +55,10 @@ function popupDependencies(overrides = {}) {
     sendMessage: async () => ({}),
     openOptionsPage: async () => {},
     closePopup: () => {},
+    localStorage: {
+      get: async () => ({}),
+      set: async () => {},
+    },
     ...overrides,
   };
 }
@@ -67,6 +77,8 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       .map((element) => element.id),
     [
       'enabled',
+      'help-panel',
+      'help-dismiss',
       'dom-health-status',
       'subs-age',
       'refresh-subs',
@@ -78,8 +90,86 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'update-status',
       'update-check-enabled',
       'open-options',
+      'help-toggle',
     ],
   );
+});
+
+test('popup includes the exact help and subscribed-exemption copy', () => {
+  const documentObject = new JSDOM(
+    readFileSync('popup.html', 'utf8'),
+  ).window.document;
+
+  assert.equal(
+    documentObject.querySelector('#help-panel p').textContent,
+    "👎 tells YouTube you're not interested. 🚫 hides all videos from that " +
+      'channel (stored locally, undo in Options). Videos from channels you ' +
+      'subscribe to are never hidden by the age and view rules — collect ' +
+      'your subscriptions below.',
+  );
+  assert.match(
+    documentObject.body.textContent,
+    /Age and view rules skip subscribed channels\./,
+  );
+});
+
+test('first-run help is expanded when helpDismissed is absent', async () => {
+  const dependencies = popupDependencies();
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('help-panel').hidden,
+    false,
+  );
+  assert.equal(
+    dependencies.documentObject.getElementById('help-toggle').hidden,
+    true,
+  );
+});
+
+test('dismissed help is collapsed with its toggle link visible', async () => {
+  const dependencies = popupDependencies({
+    localStorage: {
+      get: async () => ({ helpDismissed: true }),
+      set: async () => {},
+    },
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('help-panel').hidden,
+    true,
+  );
+  assert.equal(
+    dependencies.documentObject.getElementById('help-toggle').hidden,
+    false,
+  );
+});
+
+test('Got it persists helpDismissed and leaves Help able to toggle', async () => {
+  const writes = [];
+  const dependencies = popupDependencies({
+    localStorage: {
+      get: async () => ({}),
+      set: async (values) => writes.push(values),
+    },
+  });
+  await initializePopup(dependencies);
+  const panel = dependencies.documentObject.getElementById('help-panel');
+  const toggle = dependencies.documentObject.getElementById('help-toggle');
+
+  dependencies.documentObject.getElementById('help-dismiss').click();
+  await settleEvents();
+
+  assert.deepEqual(writes, [{ helpDismissed: true }]);
+  assert.equal(panel.hidden, true);
+  assert.equal(toggle.hidden, false);
+  toggle.click();
+  assert.equal(panel.hidden, false);
+  toggle.click();
+  assert.equal(panel.hidden, true);
 });
 
 test('popup Refresh now sends exactly the existing refresh-subs message', () => {
@@ -107,7 +197,24 @@ test('popup renders the stale subscription age in days', async () => {
 
   assert.equal(
     dependencies.documentObject.getElementById('subs-age').textContent,
+    'Subscription list is 12 days old. ' +
+      'The amber badge means it needs a refresh.',
+  );
+});
+
+test('popup only explains the amber badge for stale subscription metadata', () => {
+  assert.equal(
+    subscriptionAgeText({ ageMs: 12 * DAY_MS, stale: false }),
     'Subscription list is 12 days old.',
+  );
+  assert.equal(
+    subscriptionAgeText({ ageMs: 31 * DAY_MS, stale: true }),
+    'Subscription list is 31 days old. ' +
+      'The amber badge means it needs a refresh.',
+  );
+  assert.equal(
+    subscriptionAgeText(null),
+    'Subscription list not collected yet - click to collect.',
   );
 });
 
@@ -400,7 +507,8 @@ test('popup renders degraded DOM health in the status palette', async () => {
   assert.equal(warning.hidden, false);
   assert.equal(
     warning.textContent,
-    'Filtering may be broken by a YouTube page change',
+    'Filtering may be broken by a YouTube page change. ' +
+      'Try reloading the YouTube tab.',
   );
   assert.equal(
     warning.classList.contains('status-line'),
@@ -622,6 +730,23 @@ test('popup renders the last sync error from initial status', async () => {
   assert.equal(
     dependencies.documentObject.getElementById('sync-status').textContent,
     'Last sync error: Previous WebDAV failure',
+  );
+});
+
+test('popup rewrites a network last-sync error in plain language', async () => {
+  const dependencies = popupDependencies({
+    sendMessage: async () => ({
+      enabled: true,
+      lastError: 'TypeError: Failed to fetch',
+    }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-status').textContent,
+    'Last sync error: Could not reach the sync server. ' +
+      'Check the URL and your connection.',
   );
 });
 

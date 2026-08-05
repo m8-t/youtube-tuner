@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   enableSync,
   exportSettings,
+  formatSyncCapabilities,
   importSettings,
   setupSyncControls,
   testSyncConnection,
@@ -57,6 +58,10 @@ test('options page renders a Sync fieldset with its controls', () => {
   const markup = readFileSync('options.html', 'utf8');
 
   assert.match(markup, /<legend>Sync<\/legend>/);
+  assert.match(
+    markup,
+    /Store the passphrase in your password manager\. It cannot be recovered — losing it means starting sync over with new data\./,
+  );
   for (const id of [
     'sync-url',
     'sync-username',
@@ -156,7 +161,7 @@ test('permission denial in Test connection stops before worker messaging', async
   );
 });
 
-test('Test connection requests the exact origin and renders capabilities', async (t) => {
+test('Test connection requests the exact origin and renders plain success copy', async (t) => {
   const harness = syncHarness(t);
   harness.documentObject.getElementById('sync-url').value =
     'https://cloud.example.com/dav/youtube-tuner.bin';
@@ -196,8 +201,60 @@ test('Test connection requests the exact origin and renders capabilities', async
   assert.equal(result.ok, true);
   assert.equal(
     harness.documentObject.getElementById('sync-message').textContent,
-    'Auth: ok. Strong ETags: yes. CAS: yes.',
+    'Connection OK — server is compatible.',
   );
+});
+
+test('capability failures explain unsafe concurrent updates plainly', () => {
+  const expected =
+    'This server does not support safe concurrent updates, sync would risk ' +
+    'data loss.';
+
+  assert.equal(formatSyncCapabilities({
+    ok: false,
+    authOk: true,
+    strongEtags: false,
+    cas: false,
+    failure: 'Probe did not return a strong ETag',
+  }), expected);
+  assert.equal(formatSyncCapabilities({
+    ok: false,
+    authOk: true,
+    strongEtags: true,
+    cas: false,
+    failure: 'Probe stale conditional update was not rejected',
+  }), expected);
+});
+
+test('capability failures use friendly transport errors before capability copy', () => {
+  assert.equal(formatSyncCapabilities({
+    ok: false,
+    authOk: true,
+    strongEtags: false,
+    cas: false,
+    failure: 'WebDAV request failed with HTTP 404',
+  }), 'Sync location not found on the server. Check the folder path.');
+  assert.equal(formatSyncCapabilities({
+    ok: false,
+    authOk: false,
+    strongEtags: false,
+    cas: false,
+    failure: 'Probe authentication failed with HTTP 401',
+  }), 'WebDAV credentials were rejected');
+  assert.equal(formatSyncCapabilities({
+    ok: false,
+    authOk: true,
+    strongEtags: false,
+    cas: false,
+    failure: 'WebDAV request failed',
+  }), 'Could not reach the sync server. Check the URL and your connection.');
+  assert.equal(formatSyncCapabilities({
+    ok: false,
+    authOk: true,
+    strongEtags: false,
+    cas: false,
+    failure: 'Probe creation failed with HTTP 500',
+  }), 'Probe creation failed with HTTP 500');
 });
 
 test('Enable sync clears the passphrase after worker success', async (t) => {

@@ -8,7 +8,9 @@ import {
   attachBlockButtons,
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
+  dismissBlockToast,
   NOT_INTERESTED_BUTTON_CLASS,
+  TOAST_CLASS,
 } from './dom/block-button.js';
 import { createStarvationNudge } from './dom/starvation.js';
 import { loadConfig, onConfigChange } from './storage/config.js';
@@ -144,6 +146,12 @@ function removeContentArtifacts(doc = document) {
   for (const host of doc.querySelectorAll(`.${BLOCK_HOST_CLASS}`)) {
     host.classList.remove(BLOCK_HOST_CLASS);
   }
+  try {
+    for (const toast of doc.querySelectorAll(`.${TOAST_CLASS}`)) {
+      toast.remove();
+    }
+  } catch {}
+  dismissBlockToast(doc);
   doc.getElementById('ytt-styles')?.remove();
 }
 
@@ -225,6 +233,7 @@ export function createFilteringLifecycle({
     const next = getConfig().enabled && isSupportedRoute(pathname);
     if (initialized && pathname !== currentPathname) {
       domHealthCanary.reset();
+      dismissBlockToast(documentObject);
     }
     currentPathname = pathname;
     if (initialized && next === active) {

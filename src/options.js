@@ -14,6 +14,7 @@ import {
   unionSubs,
 } from './storage/subs.js';
 import { SUBS_SCRAPE_BUDGET_MS } from './subs-refresh.js';
+import { friendlySyncError } from './sync/friendly-errors.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -391,8 +392,7 @@ function syncFormValues() {
 }
 
 function errorMessage(error) {
-  if (typeof error === 'string') return error;
-  return error?.message || 'Unknown error';
+  return friendlySyncError(error, 'Unknown error');
 }
 
 function formatLastSync(value) {
@@ -429,7 +429,11 @@ export function renderSyncStatus(status = {}, settings = {}) {
   let text =
     `Sync ${enabled ? 'enabled' : 'disabled'}. ` +
     `Last sync: ${lastSync}.`;
-  if (status.lastError) text += ` Last error: ${status.lastError}.`;
+  if (status.lastError) {
+    const lastError = errorMessage(status.lastError);
+    const punctuation = /[.!?]$/.test(lastError) ? '' : '.';
+    text += ` Last error: ${lastError}${punctuation}`;
+  }
   el('sync-status').textContent = text;
 }
 
@@ -457,25 +461,31 @@ async function requestSyncPermission(requestPermission) {
 }
 
 export function formatSyncCapabilities(capabilities = {}) {
-  const auth = capabilities.authOk === true
-    ? 'ok'
-    : capabilities.authOk === false
-      ? 'failed'
-      : 'unknown';
-  const strongEtags = capabilities.strongEtags === true
-    ? 'yes'
-    : capabilities.strongEtags === false
-      ? 'no'
-      : 'unknown';
-  const cas = capabilities.cas === true
-    ? 'yes'
-    : capabilities.cas === false
-      ? 'no'
-      : 'unknown';
-  let text =
-    `Auth: ${auth}. Strong ETags: ${strongEtags}. CAS: ${cas}.`;
-  if (capabilities.failure) text += ` Failure: ${capabilities.failure}.`;
-  return text;
+  if (capabilities.ok === true) {
+    return 'Connection OK — server is compatible.';
+  }
+
+  const failure = typeof capabilities.failure === 'string'
+    ? capabilities.failure
+    : '';
+  const friendlyFailure = friendlySyncError(failure, '');
+  if (capabilities.authOk === false) {
+    return 'WebDAV credentials were rejected';
+  }
+  if (failure && friendlyFailure !== failure) {
+    return friendlyFailure;
+  }
+  if (
+    (capabilities.strongEtags === false &&
+      (!failure || /etag/i.test(failure))) ||
+    (capabilities.cas === false &&
+      (capabilities.strongEtags === true ||
+        /conditional update/i.test(failure)))
+  ) {
+    return 'This server does not support safe concurrent updates, sync would ' +
+      'risk data loss.';
+  }
+  return failure || 'Server compatibility could not be confirmed.';
 }
 
 export async function testSyncConnection({
@@ -496,6 +506,9 @@ export async function testSyncConnection({
       throw new Error(errorMessage(response.error));
     }
     const capabilities = response?.capabilities || response || {};
+    try {
+      console.info('[youtube-tuner] sync capability test', capabilities);
+    } catch {}
     el('sync-message').textContent =
       formatSyncCapabilities(capabilities);
     return capabilities;

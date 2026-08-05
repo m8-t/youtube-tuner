@@ -3,6 +3,21 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.2.0] - 2026-08-05
+
+### Added
+
+- First-run help in the popup.
+- An undo toast for channel blocks.
+- A subscribed-channel exemption note in the popup.
+
+### Changed
+
+- Sync errors and connection test results are reworded in plain language.
+- The amber badge is explained in the popup.
+- The DOM-breakage warning now suggests reloading the YouTube tab.
+- Passphrase storage guidance was added to sync setup.
+
 ## [1.1.0] - 2026-08-05
 
 ### Added

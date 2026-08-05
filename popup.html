@@ -20,6 +20,8 @@
         --toggle-bg: #767676;
         --toggle-checked-bg: #1670d2;
         --toggle-thumb: #fff;
+        --help-bg: #f7f8f8;
+        --help-border: #dadce0;
         color-scheme: var(--color-scheme);
       }
       @media (prefers-color-scheme: dark) {
@@ -39,6 +41,8 @@
           --toggle-bg: #5f6368;
           --toggle-checked-bg: #8ab4f8;
           --toggle-thumb: #fff;
+          --help-bg: #292a2d;
+          --help-border: #5f6368;
         }
       }
       body {
@@ -119,10 +123,29 @@
         cursor: not-allowed;
         opacity: .55;
       }
+      #help-panel {
+        background: var(--help-bg);
+        border: 1px solid var(--help-border);
+        border-radius: 6px;
+        color: var(--muted-text-color);
+        margin: 0 0 .8em;
+        padding: .75em;
+      }
+      #help-panel p { margin-bottom: .65em; }
+      #help-panel button { margin-bottom: 0; }
+      .popup-footer { margin: 0; }
+      #help-toggle {
+        color: var(--muted-text-color);
+        font-size: .85em;
+      }
     </style>
   </head>
   <body>
     <label><input type="checkbox" id="enabled"> Filtering enabled</label>
+    <section id="help-panel">
+      <p>👎 tells YouTube you're not interested. 🚫 hides all videos from that channel (stored locally, undo in Options). Videos from channels you subscribe to are never hidden by the age and view rules — collect your subscriptions below.</p>
+      <button id="help-dismiss" type="button">Got it</button>
+    </section>
     <small id="dom-health-status" class="status-line" hidden></small>
 
     <hr>
@@ -131,6 +154,7 @@
     <button id="refresh-subs" type="button">Refresh now</button>
     <p class="explanation">A YouTube channels tab will open, scroll to the end
       (about 20 seconds), and close by itself.</p>
+    <p class="explanation">Age and view rules skip subscribed channels.</p>
 
     <div id="sync-row" hidden>
       <button id="sync-now" type="button">Sync now</button>
@@ -148,6 +172,7 @@
     <hr>
 
     <button id="open-options" type="button">Options</button>
+    <p class="popup-footer"><a id="help-toggle" href="#" hidden>Help</a></p>
 
     <script src="dist/popup.js"></script>
   </body>

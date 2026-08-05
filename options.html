@@ -89,6 +89,7 @@
       a { color: var(--link-color); }
       small, .status { color: var(--muted-text-color); }
       .status { font-size: .9em; }
+      .passphrase-guidance { display: block; }
       button {
         background: var(--button-bg);
         border: 1px solid var(--control-border);
@@ -248,6 +249,7 @@
             <td>
               <input type="password" id="sync-passphrase">
               <span class="status">encrypts your data, never stored or uploaded, needed on every device</span>
+              <span class="status passphrase-guidance">Store the passphrase in your password manager. It cannot be recovered — losing it means starting sync over with new data.</span>
             </td>
           </tr>
         </tbody>

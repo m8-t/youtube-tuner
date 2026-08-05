@@ -18,6 +18,7 @@ import {
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
+  TOAST_CLASS,
 } from '../src/dom/block-button.js';
 import { COLLAPSED_SECTION_CLASS } from '../src/dom/empty-sections.js';
 import { DEFAULT_CONFIG } from '../src/rules/defaults.js';
@@ -78,6 +79,7 @@ function assertCleanFilteringPage(doc) {
     0,
   );
   assert.equal(doc.querySelectorAll(`.${BLOCK_HOST_CLASS}`).length, 0);
+  assert.equal(doc.querySelectorAll(`.${TOAST_CLASS}`).length, 0);
   assert.equal(doc.querySelectorAll(`.${COLLAPSED_SECTION_CLASS}`).length, 0);
   assert.equal(doc.querySelectorAll('#ytt-styles').length, 0);
 }
@@ -114,11 +116,28 @@ test('navigating from home to results tears down every content artifact', (t) =>
   t.after(() => lifecycle.stop());
   lifecycle.sync();
   assert.ok(doc.querySelector(`.${HIDDEN_CLASS}`));
+  const toast = doc.createElement('div');
+  toast.className = TOAST_CLASS;
+  doc.body.appendChild(toast);
 
   setPathname('/results');
   lifecycle.sync();
 
   assertCleanFilteringPage(doc);
+});
+
+test('navigation between supported routes dismisses a block toast', (t) => {
+  const { doc, lifecycle, setPathname } = setupFilteringLifecycle();
+  t.after(() => lifecycle.stop());
+  lifecycle.sync();
+  const toast = doc.createElement('div');
+  toast.className = TOAST_CLASS;
+  doc.body.appendChild(toast);
+
+  setPathname('/watch');
+  lifecycle.sync();
+
+  assert.equal(doc.querySelector(`.${TOAST_CLASS}`), null);
 });
 
 test('navigating from results back to home restores filtering', (t) => {
