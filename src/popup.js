@@ -8,6 +8,8 @@ import {
 } from './update-check.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
 const LATEST_RELEASE_URL =
   'https://github.com/m8-t/youtube-tuner/releases/latest';
 
@@ -48,10 +50,35 @@ function errorMessage(error) {
   return error?.message || 'Sync failed';
 }
 
+export function lastSyncText(lastSyncAt, {
+  now = Date.now,
+} = {}) {
+  if (lastSyncAt === null || lastSyncAt === undefined) {
+    return 'Last sync: never';
+  }
+
+  const date = new Date(lastSyncAt);
+  const ageMs = Math.max(0, now() - date.getTime());
+  if (ageMs < MINUTE_MS) return 'Last sync: just now';
+  if (ageMs < HOUR_MS) {
+    return `Last sync: ${Math.floor(ageMs / MINUTE_MS)} min ago`;
+  }
+  if (ageMs < DAY_MS) {
+    return `Last sync: ${Math.floor(ageMs / HOUR_MS)} h ago`;
+  }
+  return `Last sync: ${date.toLocaleString()}`;
+}
+
+function renderLastSync(lastSyncAt, documentObject, now) {
+  documentObject.getElementById('sync-last-sync').textContent =
+    lastSyncText(lastSyncAt, { now });
+}
+
 export async function runSyncNow({
   documentObject = document,
   button = documentObject.getElementById('sync-now'),
   sendMessage = (message) => chrome.runtime.sendMessage(message),
+  now = Date.now,
 } = {}) {
   const statusElement = documentObject.getElementById('sync-status');
   button.disabled = true;
@@ -61,6 +88,10 @@ export async function runSyncNow({
       throw new Error(errorMessage(response?.error));
     }
     statusElement.textContent = 'Sync complete.';
+    try {
+      const status = await sendMessage({ type: 'sync-status' });
+      renderLastSync(status?.lastSyncAt, documentObject, now);
+    } catch {}
     return true;
   } catch (error) {
     statusElement.textContent = errorMessage(error);
@@ -195,6 +226,7 @@ export async function initializePopup({
   manualUpdateChecker = createManualUpdateChecker(),
   sendMessage = (message) => chrome.runtime.sendMessage(message),
   closePopup = () => window.close(),
+  now = Date.now,
 } = {}) {
   const [meta, config] = await Promise.all([
     loadMeta(),
@@ -222,6 +254,7 @@ export async function initializePopup({
     const status = await sendMessage({ type: 'sync-status' });
     if (status?.enabled === true) {
       syncRow.hidden = false;
+      renderLastSync(status.lastSyncAt, documentObject, now);
       if (status.lastError) {
         syncStatus.textContent = `Last sync error: ${status.lastError}`;
       }
@@ -262,6 +295,7 @@ export async function initializePopup({
       documentObject,
       button: syncButton,
       sendMessage,
+      now,
     });
   });
 

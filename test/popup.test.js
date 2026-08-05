@@ -19,6 +19,7 @@ function popupDocument() {
     <div id="sync-row" hidden>
       <button id="sync-now" type="button">Sync now</button>
       <small id="sync-status"></small>
+      <small id="sync-last-sync"></small>
     </div>
     <button id="check-update" type="button">Check for updates</button>
     <p id="update-status" hidden></p>
@@ -68,6 +69,7 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'sync-row',
       'sync-now',
       'sync-status',
+      'sync-last-sync',
       'check-update',
       'update-status',
       'update-check-enabled',
@@ -356,6 +358,135 @@ test('popup shows the sync row when sync is enabled', async () => {
   );
 });
 
+test('popup renders a missing or null last sync as never', async (t) => {
+  for (const status of [
+    { enabled: true },
+    { enabled: true, lastSyncAt: null },
+  ]) {
+    await t.test(JSON.stringify(status), async () => {
+      const dependencies = popupDependencies({
+        sendMessage: async () => status,
+      });
+
+      await initializePopup(dependencies);
+
+      assert.equal(
+        dependencies.documentObject
+          .getElementById('sync-last-sync').textContent,
+        'Last sync: never',
+      );
+    });
+  }
+});
+
+test('popup renders a last sync under 60 seconds ago as just now', async () => {
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
+  const dependencies = popupDependencies({
+    now: () => now,
+    sendMessage: async () => ({
+      enabled: true,
+      lastSyncAt: now - 59_999,
+    }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    'Last sync: just now',
+  );
+});
+
+test('popup renders a last sync under 60 minutes ago in minutes', async () => {
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
+  const dependencies = popupDependencies({
+    now: () => now,
+    sendMessage: async () => ({
+      enabled: true,
+      lastSyncAt: now - (17 * 60 * 1000),
+    }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    'Last sync: 17 min ago',
+  );
+});
+
+test('popup renders a last sync under 24 hours ago in hours', async () => {
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
+  const dependencies = popupDependencies({
+    now: () => now,
+    sendMessage: async () => ({
+      enabled: true,
+      lastSyncAt: now - (9 * 60 * 60 * 1000),
+    }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    'Last sync: 9 h ago',
+  );
+});
+
+test('popup renders a last sync at least 24 hours ago as locale time', async () => {
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
+  const lastSyncAt = '2026-08-03T06:30:00.000Z';
+  const dependencies = popupDependencies({
+    now: () => now,
+    sendMessage: async () => ({ enabled: true, lastSyncAt }),
+  });
+
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    `Last sync: ${new Date(lastSyncAt).toLocaleString()}`,
+  );
+});
+
+test('popup refreshes last sync after Sync now succeeds', async () => {
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
+  const previousSync = now - (2 * 60 * 60 * 1000);
+  let statusRequests = 0;
+  const sent = [];
+  const dependencies = popupDependencies({
+    now: () => now,
+    sendMessage: async (message) => {
+      sent.push(message);
+      if (message.type === 'sync-run') return { ok: true };
+      statusRequests += 1;
+      return {
+        enabled: true,
+        lastSyncAt: statusRequests === 1 ? previousSync : now,
+      };
+    },
+  });
+  await initializePopup(dependencies);
+
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    'Last sync: 2 h ago',
+  );
+
+  dependencies.documentObject.getElementById('sync-now').click();
+  await settleEvents();
+
+  assert.deepEqual(sent, [
+    { type: 'sync-status' },
+    { type: 'sync-run' },
+    { type: 'sync-status' },
+  ]);
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    'Last sync: just now',
+  );
+});
+
 test('popup Sync now sends sync-run and disables the button during the run', async () => {
   const sent = [];
   let finishSync;
@@ -404,10 +535,12 @@ test('popup renders a successful manual sync', async () => {
 });
 
 test('popup renders a manual sync error response', async () => {
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
   const dependencies = popupDependencies({
+    now: () => now,
     sendMessage: async (message) => (
       message.type === 'sync-status'
-        ? { enabled: true }
+        ? { enabled: true, lastSyncAt: now - (3 * 60 * 60 * 1000) }
         : { error: 'WebDAV unavailable' }
     ),
   });
@@ -419,6 +552,10 @@ test('popup renders a manual sync error response', async () => {
   assert.equal(
     dependencies.documentObject.getElementById('sync-status').textContent,
     'WebDAV unavailable',
+  );
+  assert.equal(
+    dependencies.documentObject.getElementById('sync-last-sync').textContent,
+    'Last sync: 3 h ago',
   );
 });
 

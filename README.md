@@ -159,8 +159,8 @@ the subscription list is absent or stale.
 A click on the toolbar icon opens the control menu. The menu has the filter
 on/off switch, the subscription-list status with a refresh button, the
 **Check for updates** button, and the daily update check switch. When sync
-is enabled, the menu also has a **Sync now** button, which shows the last
-sync error if one exists.
+is enabled, the menu also has a **Sync now** button, the time of the last
+sync, and the last sync error if one exists.
 
 Use the options page to set the limits, edit channel lists, clear the watched
 history, and export or import settings.
