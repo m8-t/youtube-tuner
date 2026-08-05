@@ -3,6 +3,16 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.3.0] - 2026-08-05
+
+### Added
+
+- Native Undo sync removes the matching channel from the local blocklist.
+
+### Removed
+
+- Block undo toast (YouTube's native blocked-tile UI already offers undo functionality)
+
 ## [1.2.0] - 2026-08-05
 
 ### Added

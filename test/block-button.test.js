@@ -3,13 +3,11 @@ import assert from 'node:assert/strict';
 import { html } from './helpers/dom.js';
 import {
   attachBlockButtons,
+  disarmNativeUndo,
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
-  dismissBlockToast,
   NOT_INTERESTED_BUTTON_CLASS,
-  showBlockToast,
-  TOAST_CLASS,
-  TOAST_UNDO_CLASS,
+  readNativeUndo,
 } from '../src/dom/block-button.js';
 import { readTile, TILE_SELECTOR } from '../src/dom/tile-adapter.js';
 
@@ -24,17 +22,12 @@ function setup(markup, shouldOffer) {
       readTile,
       onBlock: (name) => blocked.push(name),
       onNativeAction: (request) => nativeActions.push(request.action),
-      showToast: () => {},
       doc,
     };
     if (shouldOffer !== undefined) options.shouldOffer = shouldOffer;
     attachBlockButtons(options);
   };
   return { doc, blocked, nativeActions, run };
-}
-
-function settleEvents() {
-  return new Promise((resolve) => setImmediate(resolve));
 }
 
 // readTile takes the channel from an aria-label, not from a channel href.
@@ -68,6 +61,17 @@ test('block button fires the native action and unconditional local block write',
 
   assert.deepEqual(nativeActions, ['dontRecommendChannel']);
   assert.deepEqual(blocked, ['Some Channel']);
+});
+
+test('clicking the block button arms its tile with the channel name', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run();
+  const element = doc.querySelector('#a');
+
+  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
+
+  assert.equal(readNativeUndo(element), 'Some Channel');
+  disarmNativeUndo(element);
 });
 
 test('is idempotent across repeated scans', () => {
@@ -208,84 +212,4 @@ test('a throwing readTile does not prevent later tiles from getting buttons', ()
 
   assert.equal(doc.querySelector('#a').querySelector(`.${BLOCK_BUTTON_CLASS}`), null);
   assert.ok(doc.querySelector('#b').querySelector(`.${BLOCK_BUTTON_CLASS}`));
-});
-
-test('a successful block renders the channel toast and Undo removes it', async () => {
-  const doc = html(tile('a', 'video1', 'Some Channel'));
-  const removed = [];
-  const timers = [];
-
-  attachBlockButtons({
-    root: doc.body,
-    tileSelector: TILE_SELECTOR,
-    readTile,
-    onBlock: async () => {},
-    onNativeAction: async () => {},
-    removeBlockedChannel: async (channelName) => removed.push(channelName),
-    showToast: (channelName, options) => showBlockToast(channelName, {
-      ...options,
-      setTimer(callback, delay) {
-        timers.push({ callback, delay });
-        return timers.length;
-      },
-      clearTimer() {},
-    }),
-    doc,
-  });
-
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
-  await settleEvents();
-
-  const toast = doc.querySelector(`.${TOAST_CLASS}`);
-  assert.ok(toast);
-  assert.equal(toast.firstChild.textContent, 'Blocked Some Channel');
-  assert.equal(timers[0].delay, 6_000);
-  toast.querySelector(`.${TOAST_UNDO_CLASS}`).click();
-  await settleEvents();
-  assert.deepEqual(removed, ['Some Channel']);
-  assert.equal(doc.querySelector(`.${TOAST_CLASS}`), null);
-});
-
-test('a block toast auto-dismisses after six seconds', () => {
-  const doc = html('');
-  let expire;
-  showBlockToast('Timed Channel', {
-    doc,
-    setTimer(callback, delay) {
-      assert.equal(delay, 6_000);
-      expire = callback;
-      return 1;
-    },
-    clearTimer() {},
-  });
-  assert.ok(doc.querySelector(`.${TOAST_CLASS}`));
-
-  expire();
-
-  assert.equal(doc.querySelector(`.${TOAST_CLASS}`), null);
-});
-
-test('a second block replaces the existing toast', () => {
-  const doc = html('');
-  const cleared = [];
-  let nextTimer = 0;
-  const options = {
-    doc,
-    setTimer() {
-      nextTimer += 1;
-      return nextTimer;
-    },
-    clearTimer(timer) {
-      cleared.push(timer);
-    },
-  };
-
-  showBlockToast('First Channel', options);
-  showBlockToast('Second Channel', options);
-
-  const toasts = doc.querySelectorAll(`.${TOAST_CLASS}`);
-  assert.equal(toasts.length, 1);
-  assert.equal(toasts[0].firstChild.textContent, 'Blocked Second Channel');
-  assert.deepEqual(cleared, [1]);
-  dismissBlockToast(doc);
 });

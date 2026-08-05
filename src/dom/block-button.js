@@ -1,78 +1,42 @@
 import { runNativeMenuAction } from './native-menu.js';
-import { removeBlocked } from '../storage/blocklist.js';
 
 export const BLOCK_BUTTON_CLASS = 'ytt-block';
 export const BLOCK_HOST_CLASS = 'ytt-block-host';
 export const NOT_INTERESTED_BUTTON_CLASS = 'ytt-not-interested';
-export const TOAST_CLASS = 'ytt-toast';
-export const TOAST_UNDO_CLASS = 'ytt-toast-undo';
 
-const TOAST_DURATION_MS = 6_000;
-const toastState = new WeakMap();
+const nativeUndoArms = new WeakMap();
 
-export function dismissBlockToast(doc = document) {
+export function armNativeUndo(tile, channelName) {
   try {
-    const state = toastState.get(doc);
-    if (state) {
-      try {
-        state.clearTimer(state.timer);
-      } catch {}
-      toastState.delete(doc);
-    }
-    for (const toast of doc.querySelectorAll(`.${TOAST_CLASS}`)) {
-      toast.remove();
-    }
+    if (!tile || !channelName) return false;
+    nativeUndoArms.set(tile, channelName);
+    return true;
   } catch {
-    // Toast cleanup must never affect filtering.
+    return false;
   }
 }
 
-export function showBlockToast(channelName, {
-  doc = document,
-  removeBlockedChannel = removeBlocked,
-  setTimer = (callback, delay) => setTimeout(callback, delay),
-  clearTimer = (timer) => clearTimeout(timer),
-} = {}) {
-  let toast = null;
+export function readNativeUndo(tile) {
   try {
-    dismissBlockToast(doc);
-    toast = doc.createElement('div');
-    toast.className = TOAST_CLASS;
-    toast.setAttribute('role', 'status');
-    toast.append(`Blocked ${channelName}`);
-
-    const undoButton = doc.createElement('button');
-    undoButton.className = TOAST_UNDO_CLASS;
-    undoButton.type = 'button';
-    undoButton.textContent = 'Undo';
-    undoButton.addEventListener('click', () => {
-      dismissBlockToast(doc);
-      try {
-        Promise.resolve(removeBlockedChannel(channelName)).catch(() => {});
-      } catch {
-        // Undo feedback must never affect filtering.
-      }
-    });
-    toast.appendChild(undoButton);
-    doc.body.appendChild(toast);
-
-    const timer = setTimer(() => {
-      try {
-        if (toastState.get(doc)?.toast === toast) toastState.delete(doc);
-        toast.remove();
-      } catch {
-        // Toast expiry must never affect filtering.
-      }
-    }, TOAST_DURATION_MS);
-    toastState.set(doc, { clearTimer, timer, toast });
-    return toast;
+    return nativeUndoArms.get(tile);
   } catch {
-    try {
-      toast?.remove();
-    } catch {}
-    return null;
+    return undefined;
   }
 }
+
+export function disarmNativeUndo(tile) {
+  try {
+    return nativeUndoArms.delete(tile);
+  } catch {
+    return false;
+  }
+}
+
+export const nativeUndoRegistry = Object.freeze({
+  arm: armNativeUndo,
+  read: readNativeUndo,
+  disarm: disarmNativeUndo,
+});
 
 export function attachBlockButtons({
   root,
@@ -82,8 +46,7 @@ export function attachBlockButtons({
   doc,
   shouldOffer = () => true,
   onNativeAction = runNativeMenuAction,
-  removeBlockedChannel = removeBlocked,
-  showToast = showBlockToast,
+  registry = nativeUndoRegistry,
 }) {
   for (const element of root.querySelectorAll(tileSelector)) {
     let tile = null;
@@ -155,21 +118,14 @@ export function attachBlockButtons({
           // The local block below is intentionally independent of this call.
         }
         try {
-          Promise.resolve(onBlock(channelName))
-            .then(() => {
-              try {
-                const feedback = showToast(
-                  channelName,
-                  { doc, removeBlockedChannel },
-                );
-                void Promise.resolve(feedback).catch(() => {});
-              } catch {
-                // Toast feedback must never affect filtering.
-              }
-            })
-            .catch(() => {});
+          Promise.resolve(onBlock(channelName)).catch(() => {});
         } catch {
           // A synchronous storage failure must not escape the click handler.
+        }
+        try {
+          registry.arm(element, channelName);
+        } catch {
+          // Undo tracking must never affect the block action.
         }
       });
       element.appendChild(button);
