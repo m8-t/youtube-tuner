@@ -54,6 +54,9 @@ function createServer({
     if (method === 'GET') {
       const file = files.get(url);
       if (!file) return new Response(null, { status: 404 });
+      if (headers.get('If-None-Match') === file.etag) {
+        return new Response(null, { status: 304 });
+      }
       return new Response(file.body, {
         status: 200,
         headers: { ETag: file.etag },
@@ -129,6 +132,22 @@ test('read returns the blob and raw strong ETag', async () => {
     await backend(server).read(),
     { blob: bytes([1, 2, 3]), revision: '"revision-1"' },
   );
+});
+
+test('conditional read returns unchanged on 304 without requiring an ETag', async () => {
+  const server = createServer();
+  const webdav = backend(server);
+  const revision = await webdav.write(bytes([1, 2, 3]), null);
+  server.requests.length = 0;
+
+  assert.deepEqual(
+    await webdav.read({ ifNoneMatch: revision }),
+    { unchanged: true, revision },
+  );
+  assert.equal(server.requests.length, 1);
+  assert.equal(server.requests[0].method, 'GET');
+  assert.equal(server.requests[0].headers.get('If-None-Match'), revision);
+  assert.equal(server.requests[0].cache, 'no-store');
 });
 
 test('read rejects weak ETags with a typed backend error', async () => {

@@ -115,8 +115,17 @@ export function createWebdavBackend({
     return requireStrongEtag(response, action);
   }
 
-  async function read() {
-    const response = await request(objectUrl, 'GET');
+  async function read({ ifNoneMatch } = {}) {
+    const conditional = typeof ifNoneMatch === 'string'
+      && ifNoneMatch.length > 0;
+    const response = conditional
+      ? await request(objectUrl, 'GET', {
+        headers: { 'If-None-Match': ifNoneMatch },
+      })
+      : await request(objectUrl, 'GET');
+    if (conditional && response.status === 304) {
+      return { unchanged: true, revision: ifNoneMatch };
+    }
     if (response.status === 404) return null;
     if (!response.ok) throw httpError('WebDAV read', response);
     const revision = requireStrongEtag(response, 'WebDAV read');

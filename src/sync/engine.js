@@ -459,17 +459,30 @@ export function createSyncEngine({
       const captured = await capture(timestamp);
       let merged = captured.doc;
       let changed = captured.changed;
-      let remote = await backend.read();
-      let remoteDoc = await decryptRemote(remote, savedKey.key);
-      let revision = remote?.revision ?? null;
+      const storedRevision = privateState.meta.revision;
+      const hasStoredRevision = typeof storedRevision === 'string'
+        && storedRevision.length > 0;
+      let remote = hasStoredRevision
+        ? await backend.read({ ifNoneMatch: storedRevision })
+        : await backend.read();
+      const remoteUnchanged = remote?.unchanged === true;
+      let remoteDoc = remoteUnchanged
+        ? null
+        : await decryptRemote(remote, savedKey.key);
+      let revision = remoteUnchanged
+        ? storedRevision
+        : remote?.revision ?? null;
 
-      if (remoteDoc !== null) {
+      if (!remoteUnchanged && remoteDoc !== null) {
         merged = merge(merged, remoteDoc, timestamp);
       }
-      changed = await saveAndProject(merged) || changed;
+      if (!remoteUnchanged) {
+        changed = await saveAndProject(merged) || changed;
+      }
 
-      let needsWrite = remoteDoc === null
-        || !documentsEqual(merged, remoteDoc);
+      let needsWrite = remoteUnchanged
+        ? captured.changed || privateState.meta.dirty
+        : remoteDoc === null || !documentsEqual(merged, remoteDoc);
       let writeAttempts = 0;
       while (needsWrite) {
         writeAttempts += 1;

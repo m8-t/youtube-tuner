@@ -301,8 +301,8 @@ export async function ensureSyncPullAlarm({
 } = {}) {
   if (typeof alarms.get !== 'function') return false;
   const existing = await alarms.get(SYNC_PULL_ALARM);
-  if (existing) return false;
-  alarms.create(SYNC_PULL_ALARM, { periodInMinutes: 1440 });
+  if (existing?.periodInMinutes === 15) return false;
+  alarms.create(SYNC_PULL_ALARM, { periodInMinutes: 15 });
   return true;
 }
 

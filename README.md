@@ -241,7 +241,9 @@ with a different value or a channel that was deliberately removed on another
 device, the server copy wins.
 
 After the setup, sync is automatic: a change uploads after a short delay,
-and each device pulls once per day and at each browser start. The **Sync
+and each device checks the server every 15 minutes and at each browser
+start. The check is a conditional request: if nothing changed on the
+server, no data is downloaded. The **Sync
 now** button forces an immediate sync. Changes merge per item; a deletion on
 one device wins over an old entry on another device. A device that is
 offline for more than 90 days can bring a deleted entry back.

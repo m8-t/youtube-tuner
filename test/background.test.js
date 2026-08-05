@@ -10,6 +10,7 @@ const {
   STALE_BADGE_COLOR,
   SUBS_COLLECTION_RESULT_MESSAGE,
   createSubscriptionTabCoordinator,
+  ensureSyncPullAlarm,
   createUpdateCheckRunner,
   refreshSubscriptionIndicators,
   refreshSubs,
@@ -55,6 +56,56 @@ test('background keeps both daily maintenance alarms', () => {
     { name: 'refresh-subs', options: { periodInMinutes: 1440 } },
     { name: 'check-update', options: { periodInMinutes: 1440 } },
   ]);
+});
+
+test('sync pull alarm migration replaces an existing daily alarm', async () => {
+  let current = {
+    name: 'sync-pull',
+    periodInMinutes: 1440,
+  };
+  const clears = [];
+  const creates = [];
+  const alarms = {
+    async get(name) {
+      assert.equal(name, 'sync-pull');
+      return current;
+    },
+    create(name, options) {
+      creates.push({ name, options });
+      current = { name, ...options };
+    },
+    clear(name) {
+      clears.push(name);
+    },
+  };
+
+  assert.equal(await ensureSyncPullAlarm({ alarms }), true);
+  assert.deepEqual(creates, [{
+    name: 'sync-pull',
+    options: { periodInMinutes: 15 },
+  }]);
+  assert.deepEqual(clears, []);
+  assert.deepEqual(current, {
+    name: 'sync-pull',
+    periodInMinutes: 15,
+  });
+});
+
+test('sync pull alarm already at 15 minutes is left alone', async () => {
+  const alarms = {
+    async get(name) {
+      assert.equal(name, 'sync-pull');
+      return { name, periodInMinutes: 15 };
+    },
+    create() {
+      assert.fail('a matching alarm must not be recreated');
+    },
+    clear() {
+      assert.fail('a matching alarm must not be cleared');
+    },
+  };
+
+  assert.equal(await ensureSyncPullAlarm({ alarms }), false);
 });
 
 test('background permanently attaches the popup and has no click handler', () => {

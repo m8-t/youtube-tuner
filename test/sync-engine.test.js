@@ -309,8 +309,10 @@ test('runSync happy path uploads local state and persists success metadata', asy
     },
   });
   const writes = [];
+  const readCalls = [];
   const backend = {
-    async read() {
+    async read(...args) {
+      readCalls.push(args);
       return null;
     },
     async write(blob, revision) {
@@ -328,6 +330,7 @@ test('runSync happy path uploads local state and persists success metadata', asy
     await engine.runSync(),
     { ok: true, changed: true },
   );
+  assert.deepEqual(readCalls, [[]]);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].revision, null);
   const uploaded = await decrypt(writes[0].blob, key);
@@ -338,6 +341,246 @@ test('runSync happy path uploads local state and persists success metadata', asy
     lastError: null,
     dirty: false,
   });
+});
+
+test('304 with clean local state only updates sync metadata', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const revision = '"revision-1"';
+  const localDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'actor-a',
+    NOW - 10,
+  );
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: {
+        revision,
+        lastSyncAt: NOW - 100,
+        lastError: null,
+        dirty: false,
+      },
+      syncSettings: SETTINGS,
+    },
+  });
+  const readCalls = [];
+  const backend = {
+    async read(...args) {
+      readCalls.push(args);
+      return { unchanged: true, revision };
+    },
+    async write() {
+      assert.fail('an unchanged clean cycle must not upload');
+    },
+  };
+  const engine = makeEngine({
+    storage,
+    backend,
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
+  assert.deepEqual(readCalls, [[{ ifNoneMatch: revision }]]);
+  assert.deepEqual(storage.writes.sync, []);
+  assert.deepEqual(storage.writes.local, [{
+    syncMeta: {
+      revision,
+      lastSyncAt: NOW,
+      lastError: null,
+      dirty: false,
+    },
+  }]);
+});
+
+test('304 uploads newly captured local changes with the stored revision', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const revision = '"revision-1"';
+  const localDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'actor-a',
+    NOW - 10,
+  );
+  const storage = fakeStorage({
+    sync: {
+      config: { ...copy(DEFAULT_CONFIG), enabled: false },
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: { ...DEFAULT_META, revision },
+      syncSettings: SETTINGS,
+    },
+  });
+  const writes = [];
+  const backend = {
+    async read(options) {
+      assert.deepEqual(options, { ifNoneMatch: revision });
+      return { unchanged: true, revision };
+    },
+    async write(blob, writeRevision) {
+      writes.push({ blob, revision: writeRevision });
+      return '"revision-2"';
+    },
+  };
+  const engine = makeEngine({
+    storage,
+    backend,
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: true });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].revision, revision);
+  const uploaded = await decrypt(writes[0].blob, key);
+  assert.equal(uploaded.configFields.enabled.value, false);
+});
+
+test('304 uploads an already-dirty document without a new capture diff', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const revision = '"revision-1"';
+  const localDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'actor-a',
+    NOW - 10,
+  );
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: { ...DEFAULT_META, revision, dirty: true },
+      syncSettings: SETTINGS,
+    },
+  });
+  const writeRevisions = [];
+  const backend = {
+    async read() {
+      return { unchanged: true, revision };
+    },
+    async write(blob, writeRevision) {
+      writeRevisions.push(writeRevision);
+      return '"revision-2"';
+    },
+  };
+  const engine = makeEngine({
+    storage,
+    backend,
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: true });
+  assert.deepEqual(writeRevisions, [revision]);
+});
+
+test('304 upload conflict re-reads unconditionally and merges remote changes', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const storedRevision = '"revision-1"';
+  const localDoc = storageToDoc(
+    { ...DEFAULT_CONFIG, enabled: false },
+    {},
+    [],
+    [],
+    [],
+    'local-actor',
+    NOW - 10,
+  );
+  const remoteDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'remote-actor',
+    NOW - 100,
+  );
+  setBlocklistEntry(
+    remoteDoc,
+    'Remote Block',
+    true,
+    createClock(NOW - 1, 1, 'remote-actor'),
+  );
+  const remoteBlob = await encrypt(remoteDoc, key);
+  const storage = fakeStorage({
+    sync: {
+      config: { ...copy(DEFAULT_CONFIG), enabled: false },
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: { ...DEFAULT_META, revision: storedRevision, dirty: true },
+      syncSettings: SETTINGS,
+    },
+  });
+  const readCalls = [];
+  const writeRevisions = [];
+  let reads = 0;
+  const uploaded = [];
+  const backend = {
+    async read(...args) {
+      readCalls.push(args);
+      reads += 1;
+      if (reads === 1) {
+        return { unchanged: true, revision: storedRevision };
+      }
+      return { blob: remoteBlob, revision: '"revision-2"' };
+    },
+    async write(blob, revision) {
+      writeRevisions.push(revision);
+      if (writeRevisions.length === 1) throw new ConflictError();
+      uploaded.push(await decrypt(blob, key));
+      return '"revision-3"';
+    },
+  };
+  const engine = makeEngine({
+    storage,
+    backend,
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: true });
+  assert.deepEqual(readCalls, [
+    [{ ifNoneMatch: storedRevision }],
+    [],
+  ]);
+  assert.deepEqual(writeRevisions, [storedRevision, '"revision-2"']);
+  assert.equal(uploaded[0].configFields.enabled.value, false);
+  assert.equal(uploaded[0].blocklist['Remote Block'].present, true);
+  assert.deepEqual(storage.values.local.blocklist, ['Remote Block']);
+  assert.equal(storage.values.local.syncMeta.revision, '"revision-3"');
 });
 
 test('pull apply followed by an immediate run does not upload', async () => {
