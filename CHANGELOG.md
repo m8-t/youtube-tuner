@@ -3,6 +3,14 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## 1.0.1 - 2026-08-05
+
+### Fixed
+
+- Installs on a 1.0.0 beta build could not update to 1.0.0: the browser
+  treats the beta build number 1.0.0.N as higher than 1.0.0 and refuses
+  the "downgrade". No other changes.
+
 ## 1.0.0 - 2026-08-05
 
 ### Added
