@@ -10,8 +10,9 @@
         --text-color: #000;
         --muted-text-color: #666;
         --panel-bg: transparent;
-        --button-bg: #f0f0f0;
-        --button-hover-bg: #e5e5e5;
+        --button-bg: #f1f3f4;
+        --button-hover-bg: #e8eaed;
+        --button-active-bg: #dadce0;
         --button-text: #000;
         --input-bg: #fff;
         --input-text: #000;
@@ -32,8 +33,9 @@
           --text-color: #f1f3f4;
           --muted-text-color: #bdc1c6;
           --panel-bg: #292a2d;
-          --button-bg: #3c4043;
-          --button-hover-bg: #4a4e52;
+          --button-bg: #303134;
+          --button-hover-bg: #3c4043;
+          --button-active-bg: #292a2d;
           --button-text: #f1f3f4;
           --input-bg: #303134;
           --input-text: #f1f3f4;
@@ -89,11 +91,23 @@
       .status { font-size: .9em; }
       button {
         background: var(--button-bg);
-        border-color: var(--control-border);
+        border: 1px solid var(--control-border);
+        border-radius: 6px;
         color: var(--button-text);
         cursor: pointer;
+        font: inherit;
+        padding: .45em .85em;
+        transition: background-color 120ms ease;
       }
-      button:hover { background: var(--button-hover-bg); }
+      button:not(:disabled):hover { background: var(--button-hover-bg); }
+      button:not(:disabled):active {
+        background: var(--button-active-bg);
+        box-shadow: inset 0 1px 2px rgb(0 0 0 / .12);
+      }
+      button:disabled {
+        cursor: default;
+        opacity: .55;
+      }
       input[type="checkbox"] {
         appearance: none;
         background: var(--toggle-bg);
