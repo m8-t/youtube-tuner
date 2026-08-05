@@ -744,6 +744,354 @@ test('runSync records an error after exhausting conflict retries', async () => {
   assert.equal(storage.values.local.syncMeta.dirty, true);
 });
 
+test('remote clock watermark persists and ratchets upward', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const firstRemote = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'remote-actor',
+    NOW - 20,
+  );
+  const secondRemote = copy(firstRemote);
+  setConfigField(
+    secondRemote,
+    'enabled',
+    false,
+    createClock(NOW - 10, 100, 'remote-actor'),
+  );
+  const blobs = [
+    await encrypt(firstRemote, key),
+    await encrypt(secondRemote, key),
+  ];
+  let reads = 0;
+  const backend = {
+    async read() {
+      const index = Math.min(reads, blobs.length - 1);
+      reads += 1;
+      return { blob: blobs[index], revision: `"revision-${reads}"` };
+    },
+    async write() {
+      assert.fail('an adopted remote document must not be uploaded');
+    },
+  };
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: firstRemote,
+      syncMeta: DEFAULT_META,
+      syncSettings: SETTINGS,
+    },
+  });
+  const engine = makeEngine({
+    storage,
+    backend,
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 20);
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: true });
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 10);
+});
+
+test('remote clock watermark persists when a later upload fails', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const localDoc = storageToDoc(
+    { ...DEFAULT_CONFIG, enabled: false },
+    {},
+    [],
+    [],
+    [],
+    'local-actor',
+    NOW - 10,
+  );
+  const remoteDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    ['Remote Block'],
+    [],
+    [],
+    'remote-actor',
+    NOW - 20,
+  );
+  const blob = await encrypt(remoteDoc, key);
+  const storage = fakeStorage({
+    sync: {
+      config: { ...copy(DEFAULT_CONFIG), enabled: false },
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: DEFAULT_META,
+      syncSettings: SETTINGS,
+    },
+  });
+  const engine = makeEngine({
+    storage,
+    backend: {
+      async read() {
+        return { blob, revision: '"remote"' };
+      },
+      async write() {
+        throw new Error('upload unavailable');
+      },
+    },
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { error: 'upload unavailable' });
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 20);
+});
+
+test('stale remote data is rejected before merge or upload', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const localDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'local-actor',
+    NOW - 10,
+  );
+  const staleRemote = storageToDoc(
+    { ...DEFAULT_CONFIG, enabled: false },
+    {},
+    ['Remote Block'],
+    [],
+    [],
+    'remote-actor',
+    NOW - 20,
+  );
+  const blob = await encrypt(staleRemote, key);
+  let writes = 0;
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: { ...DEFAULT_META, maxRemoteTs: NOW - 10 },
+      syncSettings: SETTINGS,
+    },
+  });
+  const engine = makeEngine({
+    storage,
+    backend: {
+      async read() {
+        return { blob, revision: '"stale"' };
+      },
+      async write() {
+        writes += 1;
+      },
+    },
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), {
+    error: 'remote data is older than previously seen state',
+  });
+  assert.equal(writes, 0);
+  assert.equal(storage.values.sync.config.enabled, true);
+  assert.deepEqual(storage.values.local.blocklist, []);
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 10);
+  assert.equal(
+    storage.values.local.syncMeta.lastError,
+    'remote data is older than previously seen state',
+  );
+});
+
+test('remote data at the stored clock watermark is accepted', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const remoteDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'remote-actor',
+    NOW - 10,
+  );
+  const blob = await encrypt(remoteDoc, key);
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: remoteDoc,
+      syncMeta: { ...DEFAULT_META, maxRemoteTs: NOW - 10 },
+      syncSettings: SETTINGS,
+    },
+  });
+  const engine = makeEngine({
+    storage,
+    backend: {
+      async read() {
+        return { blob, revision: '"equal"' };
+      },
+      async write() {
+        assert.fail('an equal remote document must not be uploaded');
+      },
+    },
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 10);
+});
+
+test('a first remote pull is trusted without a clock watermark', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const remoteDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'remote-actor',
+    NOW - 50,
+  );
+  const blob = await encrypt(remoteDoc, key);
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: remoteDoc,
+      syncMeta: DEFAULT_META,
+      syncSettings: SETTINGS,
+    },
+  });
+  const engine = makeEngine({
+    storage,
+    backend: {
+      async read() {
+        return { blob, revision: '"tofu"' };
+      },
+      async write() {
+        assert.fail('an unchanged first remote must not be uploaded');
+      },
+    },
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 50);
+});
+
+test('304 response preserves the remote clock watermark without a write', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const revision = '"revision-watermarked"';
+  const localDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'actor-a',
+    NOW - 10,
+  );
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncDoc: localDoc,
+      syncMeta: {
+        ...DEFAULT_META,
+        revision,
+        maxRemoteTs: NOW - 10,
+      },
+      syncSettings: SETTINGS,
+    },
+  });
+  const engine = makeEngine({
+    storage,
+    backend: {
+      async read(options) {
+        assert.deepEqual(options, { ifNoneMatch: revision });
+        return { unchanged: true, revision };
+      },
+      async write() {
+        assert.fail('a clean 304 must not upload');
+      },
+    },
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+  });
+
+  assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
+  assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 10);
+});
+
+test('bootstrap rejects a remote document below its clock watermark', async () => {
+  const remoteDoc = storageToDoc(
+    DEFAULT_CONFIG,
+    {},
+    [],
+    [],
+    [],
+    'remote-actor',
+    NOW - 20,
+  );
+  const storage = fakeStorage({
+    sync: {
+      config: copy(DEFAULT_CONFIG),
+      channelOverrides: {},
+    },
+    local: {
+      blocklist: [],
+      manualSubs: [],
+      watched: [],
+      syncMeta: { ...DEFAULT_META, maxRemoteTs: NOW - 10 },
+    },
+  });
+
+  await assert.rejects(
+    makeEngine({ storage, backend: {} }).bootstrap(remoteDoc),
+    /remote data is older than previously seen state/,
+  );
+  assert.equal(storage.values.local.syncDoc, undefined);
+  assert.equal(
+    storage.values.local.syncMeta.lastError,
+    'remote data is older than previously seen state',
+  );
+});
+
 test('bootstrap keeps local-only fields while remote config conflicts win', async () => {
   const remote = storageToDoc(
     { enabled: false },

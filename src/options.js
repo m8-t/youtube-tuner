@@ -1,7 +1,11 @@
 import { loadConfig, saveConfig } from './storage/config.js';
 import { loadBlocklist, removeBlocked } from './storage/blocklist.js';
 import { loadWatched, clearWatched } from './storage/watched.js';
-import { loadOverrides, saveOverrides } from './storage/overrides.js';
+import {
+  loadOverrides,
+  normalizeOverrides,
+  saveOverrides,
+} from './storage/overrides.js';
 import {
   loadSubs,
   loadSubsMeta,
@@ -788,7 +792,13 @@ export async function importSettings({
       });
     }
     if (hasSync) {
-      replacements.push({ storageArea: syncStorage, values: settings.sync });
+      const syncValues = { ...settings.sync };
+      if (Object.hasOwn(syncValues, 'channelOverrides')) {
+        syncValues.channelOverrides = Object.fromEntries(
+          normalizeOverrides(syncValues.channelOverrides),
+        );
+      }
+      replacements.push({ storageArea: syncStorage, values: syncValues });
     }
     const previousValues = await Promise.all(
       replacements.map(({ storageArea }) => storageArea.get(null)),

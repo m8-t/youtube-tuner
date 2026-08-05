@@ -201,6 +201,54 @@ export function updateCountsBadge(message, tabId, {
   });
 }
 
+export function createDomHealthState({
+  tabs = chrome.tabs,
+} = {}) {
+  const byTabId = new Map();
+
+  function update(message, tabId) {
+    byTabId.set(
+      tabId,
+      message?.domHealth === 'degraded' ? 'degraded' : 'ok',
+    );
+  }
+
+  function remove(tabId) {
+    byTabId.delete(tabId);
+  }
+
+  async function active() {
+    try {
+      const activeTabs = await tabs.query({ active: true, currentWindow: true });
+      const tabId = activeTabs.find((tab) => Number.isInteger(tab.id))?.id;
+      return tabId === undefined ? 'ok' : byTabId.get(tabId) ?? 'ok';
+    } catch {
+      return 'ok';
+    }
+  }
+
+  return { active, remove, update };
+}
+
+export function createCountsMessageHandler({
+  domHealthState = createDomHealthState(),
+  updateBadge = updateCountsBadge,
+} = {}) {
+  return function handleCountsMessage(message, sender) {
+    if (message?.type !== 'counts') return;
+    const tabId = sender.tab?.id;
+    if (tabId === undefined) return;
+
+    domHealthState.update(message, tabId);
+
+    // A disabled scan reports zero hidden tiles. Keep the kill switch's "off"
+    // badge instead of replacing it with an empty count.
+    if (message.enabled === false) return;
+
+    updateBadge(message, tabId);
+  };
+}
+
 export async function refreshSubscriptionIndicators({
   action = chrome.action,
   tabs = chrome.tabs,
@@ -347,6 +395,7 @@ export function createSyncStorageChangeHandler({
 export function createSyncMessageHandler({
   engine = syncEngine,
   backendFactory = createWebdavBackend,
+  getDomHealth = () => domHealthState.active(),
 } = {}) {
   function capabilitiesFailure(error) {
     return {
@@ -365,7 +414,10 @@ export function createSyncMessageHandler({
   return function handleSyncMessage(message, _sender, sendResponse) {
     let operation;
     if (message?.type === 'sync-status') {
-      operation = () => engine.status();
+      operation = async () => ({
+        ...await engine.status(),
+        domHealth: await getDomHealth(),
+      });
     } else if (message?.type === 'sync-test') {
       operation = async () => {
         try {
@@ -396,6 +448,8 @@ export function createSyncMessageHandler({
 }
 
 const handleSyncStorageChange = createSyncStorageChangeHandler();
+const domHealthState = createDomHealthState();
+const handleCountsMessage = createCountsMessageHandler({ domHealthState });
 const handleSyncMessage = createSyncMessageHandler();
 const startSyncPull = () => syncEngine.runSync();
 
@@ -431,21 +485,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   subscriptionTabs.tabRemoved(tabId);
+  domHealthState.remove(tabId);
 });
 
 chrome.runtime.onMessage.addListener(handleSyncMessage);
 
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message?.type !== 'counts') return;
-  const tabId = sender.tab?.id;
-  if (tabId === undefined) return;
-
-  // A disabled scan reports zero hidden tiles. Keep the kill switch's "off"
-  // badge instead of replacing it with an empty count.
-  if (message.enabled === false) return;
-
-  updateCountsBadge(message, tabId);
-});
+chrome.runtime.onMessage.addListener(handleCountsMessage);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === UPDATE_CHECK_COMPLETE_MESSAGE) {

@@ -30,12 +30,15 @@ export function createApplier({
   function scan() {
     let hidden = 0;
     let visible = 0;
+    let totalMatchedTiles = 0;
+    let nullChannelNameTiles = 0;
 
     for (const element of root.querySelectorAll(tileSelector)) {
       // A grid tile wraps a lockup 1:1. Skip the inner one entirely --
       // letting it fall through to the !tile branch would count it as
       // visible and double every grid video.
       if (!isOutermostTile(element)) continue;
+      totalMatchedTiles += 1;
 
       let tile = null;
       try {
@@ -54,6 +57,7 @@ export function createApplier({
         visible += 1;
         continue;
       }
+      if (tile.channelName === null) nullChannelNameTiles += 1;
 
       const previous = applied.get(element);
       if (previous !== undefined && previous !== tile.videoId) {
@@ -77,7 +81,11 @@ export function createApplier({
 
     counts = { hidden, visible };
     try {
-      onCounts(counts);
+      onCounts({
+        ...counts,
+        totalMatchedTiles,
+        nullChannelNameTiles,
+      });
     } catch { /* a reporting failure must not break filtering */ }
   }
 

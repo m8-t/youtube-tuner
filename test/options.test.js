@@ -258,6 +258,44 @@ test('valid settings import replaces both areas and reports imported counts', as
   assert.equal(harness.button.disabled, false);
 });
 
+test('settings import normalizes channel overrides and drops junk', async () => {
+  const harness = settingsHarness();
+  const imported = {
+    format: 1,
+    sync: {
+      config: { enabled: true },
+      channelOverrides: {
+        '  Channel A  ': {
+          watched: { enabled: false, junk: true },
+          age: { enabled: true, maxAgeDays: 30, junk: true },
+          unknownRule: { enabled: true },
+        },
+        'Junk Channel': {
+          watched: { enabled: 'yes' },
+          age: { maxAgeDays: -4 },
+        },
+        '   ': { watched: { enabled: true } },
+      },
+    },
+  };
+
+  assert.equal(await importSettings({
+    ...harness,
+    file: { text: async () => JSON.stringify(imported) },
+    confirmFn: () => true,
+    renderResult: async () => {},
+  }), true);
+  assert.deepEqual(harness.mock.areas.sync, {
+    config: { enabled: true },
+    channelOverrides: {
+      'Channel A': {
+        watched: { enabled: false },
+        age: { enabled: true, maxAgeDays: 30 },
+      },
+    },
+  });
+});
+
 function overridesHarness() {
   const mock = installChromeMock({ install: false });
   const documentObject = html(`

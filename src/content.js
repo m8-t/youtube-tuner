@@ -51,6 +51,36 @@ export function isSupportedRoute(pathname) {
   return pathname === '/' || pathname === '/watch';
 }
 
+export function createDomHealthCanary() {
+  let degradedScanStreak = 0;
+  let status = 'ok';
+
+  function observe({
+    totalMatchedTiles = 0,
+    nullChannelNameTiles = 0,
+  } = {}) {
+    const degradedScan = totalMatchedTiles >= 8
+      && nullChannelNameTiles / totalMatchedTiles > 0.75;
+    degradedScanStreak = degradedScan ? degradedScanStreak + 1 : 0;
+    status = degradedScanStreak >= 5 ? 'degraded' : 'ok';
+    return status;
+  }
+
+  function reset() {
+    degradedScanStreak = 0;
+    status = 'ok';
+    return status;
+  }
+
+  return {
+    observe,
+    reset,
+    get status() {
+      return status;
+    },
+  };
+}
+
 async function refreshState() {
   const [fetchedSubs, subsMeta, manualSubs, blocklist, watched, overrides] =
     await Promise.all([
@@ -98,6 +128,7 @@ function recordCurrentVideo() {
 function onNavigate() {
   nudge.reset();
   recordCurrentVideo();
+  filtering.resetDomHealth();
   filtering.sync();
 }
 
@@ -128,7 +159,9 @@ export function createFilteringLifecycle({
   const root = documentObject.documentElement;
   let active = false;
   let initialized = false;
+  let currentPathname = null;
   let applier;
+  const domHealthCanary = createDomHealthCanary();
 
   function sendCounts(counts) {
     try {
@@ -137,6 +170,7 @@ export function createFilteringLifecycle({
         ...counts,
         enabled: getConfig().enabled,
         subsStale: getState().subsStale === true,
+        domHealth: domHealthCanary.status,
       })).catch(() => {});
     } catch {
       // Badge reporting must never affect filtering.
@@ -144,6 +178,7 @@ export function createFilteringLifecycle({
   }
 
   function reportCounts(counts) {
+    if (active) domHealthCanary.observe(counts);
     const reportedCounts = active
       ? counts
       : { hidden: 0, visible: 0 };
@@ -186,7 +221,12 @@ export function createFilteringLifecycle({
   });
 
   function sync() {
-    const next = getConfig().enabled && isSupportedRoute(getPathname());
+    const pathname = getPathname();
+    const next = getConfig().enabled && isSupportedRoute(pathname);
+    if (initialized && pathname !== currentPathname) {
+      domHealthCanary.reset();
+    }
+    currentPathname = pathname;
     if (initialized && next === active) {
       scan();
       return active;
@@ -194,6 +234,7 @@ export function createFilteringLifecycle({
 
     initialized = true;
     active = next;
+    domHealthCanary.reset();
     if (active) {
       injectStyles(documentObject);
       applier.start();
@@ -216,9 +257,14 @@ export function createFilteringLifecycle({
   function stop() {
     initialized = true;
     active = false;
+    domHealthCanary.reset();
     applier.stop();
     removeContentArtifacts(documentObject);
     reportCounts({ hidden: 0, visible: 0 });
+  }
+
+  function resetDomHealth() {
+    domHealthCanary.reset();
   }
 
   return {
@@ -226,6 +272,7 @@ export function createFilteringLifecycle({
       return active;
     },
     reportCounts,
+    resetDomHealth,
     scan,
     stop,
     sync,

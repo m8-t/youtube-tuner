@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { html } from './helpers/dom.js';
 import {
   SUBS_COLLECTION_RESULT_MESSAGE,
+  createDomHealthCanary,
   createFilteringLifecycle,
   hasStateStorageChange,
   isSupportedRoute,
@@ -33,8 +34,9 @@ function setupFilteringLifecycle({
   pathname = '/',
   enabled = true,
   subsStale = false,
+  markup = lifecycleTile,
 } = {}) {
-  const doc = html(lifecycleTile);
+  const doc = html(markup);
   let currentPathname = pathname;
   let currentConfig = { ...DEFAULT_CONFIG, enabled };
   const currentState = {
@@ -250,6 +252,78 @@ test('count reports include the captured subscription nudge flag', (t) => {
   lifecycle.reportCounts({ hidden: 3, visible: 4 });
 
   assert.equal(messages.at(-1).subsStale, true);
+});
+
+test('DOM health degrades on the fifth consecutive failing scan', () => {
+  const canary = createDomHealthCanary();
+  const failingScan = {
+    totalMatchedTiles: 8,
+    nullChannelNameTiles: 7,
+  };
+
+  for (let scan = 1; scan < 5; scan += 1) {
+    assert.equal(canary.observe(failingScan), 'ok');
+  }
+  assert.equal(canary.observe(failingScan), 'degraded');
+});
+
+test('a healthy DOM scan resets the degraded streak', () => {
+  const canary = createDomHealthCanary();
+  const failingScan = {
+    totalMatchedTiles: 8,
+    nullChannelNameTiles: 7,
+  };
+  for (let scan = 0; scan < 4; scan += 1) canary.observe(failingScan);
+
+  assert.equal(canary.observe({
+    totalMatchedTiles: 8,
+    nullChannelNameTiles: 6,
+  }), 'ok');
+  for (let scan = 0; scan < 4; scan += 1) {
+    assert.equal(canary.observe(failingScan), 'ok');
+  }
+  assert.equal(canary.observe(failingScan), 'degraded');
+});
+
+test('stopping filtering resets degraded DOM health', (t) => {
+  const markup = Array.from(
+    { length: 8 },
+    (_, index) => `<yt-lockup-view-model>
+      <a href="/watch?v=video${index}"></a>
+    </yt-lockup-view-model>`,
+  ).join('');
+  const { lifecycle, messages } = setupFilteringLifecycle({ markup });
+  t.after(() => lifecycle.stop());
+
+  lifecycle.sync();
+  for (let scan = 1; scan < 5; scan += 1) lifecycle.scan();
+  assert.equal(messages.at(-1).domHealth, 'degraded');
+
+  lifecycle.stop();
+  assert.equal(messages.at(-1).domHealth, 'ok');
+  lifecycle.sync();
+  assert.equal(messages.at(-1).domHealth, 'ok');
+});
+
+test('a route change resets degraded DOM health', (t) => {
+  const markup = Array.from(
+    { length: 8 },
+    (_, index) => `<yt-lockup-view-model>
+      <a href="/watch?v=video${index}"></a>
+    </yt-lockup-view-model>`,
+  ).join('');
+  const { lifecycle, messages, setPathname } = setupFilteringLifecycle({
+    markup,
+  });
+  t.after(() => lifecycle.stop());
+
+  lifecycle.sync();
+  for (let scan = 1; scan < 5; scan += 1) lifecycle.scan();
+  assert.equal(messages.at(-1).domHealth, 'degraded');
+
+  setPathname('/watch');
+  lifecycle.sync();
+  assert.equal(messages.at(-1).domHealth, 'ok');
 });
 
 test('a subframe never starts the content script or subscription collection', () => {

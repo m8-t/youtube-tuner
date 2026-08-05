@@ -171,6 +171,30 @@ function setsEqual(left, right) {
     && [...left].every((value) => right.has(value));
 }
 
+function maximumClockTimestamp(doc) {
+  let maximum = 0;
+  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs']) {
+    for (const entry of Object.values(doc[field] ?? {})) {
+      maximum = Math.max(maximum, entry.clock?.ts ?? 0);
+    }
+  }
+  return maximum;
+}
+
+function storedRemoteWatermark(meta) {
+  return Number.isSafeInteger(meta?.maxRemoteTs) && meta.maxRemoteTs >= 0
+    ? meta.maxRemoteTs
+    : null;
+}
+
+function acceptRemoteTimestamp(doc, watermark) {
+  const remoteTimestamp = maximumClockTimestamp(doc);
+  if (watermark !== null && remoteTimestamp < watermark) {
+    throw new Error('remote data is older than previously seen state');
+  }
+  return Math.max(watermark ?? 0, remoteTimestamp);
+}
+
 export function createSyncEngine({
   storage,
   backendFactory,
@@ -472,9 +496,14 @@ export function createSyncEngine({
       let revision = remoteUnchanged
         ? storedRevision
         : remote?.revision ?? null;
+      let remoteWatermark = storedRemoteWatermark(privateState.meta);
+      let observedRemote = false;
 
       if (!remoteUnchanged && remoteDoc !== null) {
+        remoteWatermark = acceptRemoteTimestamp(remoteDoc, remoteWatermark);
         merged = merge(merged, remoteDoc, timestamp);
+        observedRemote = true;
+        await patchMeta({ maxRemoteTs: remoteWatermark });
       }
       if (!remoteUnchanged) {
         changed = await saveAndProject(merged) || changed;
@@ -503,7 +532,13 @@ export function createSyncEngine({
           remoteDoc = await decryptRemote(remote, savedKey.key);
           revision = remote?.revision ?? null;
           if (remoteDoc !== null) {
+            remoteWatermark = acceptRemoteTimestamp(
+              remoteDoc,
+              remoteWatermark,
+            );
             merged = merge(merged, remoteDoc, timestamp);
+            observedRemote = true;
+            await patchMeta({ maxRemoteTs: remoteWatermark });
           }
           changed = await saveAndProject(merged) || changed;
           needsWrite = remoteDoc === null
@@ -512,11 +547,12 @@ export function createSyncEngine({
       }
 
       await persistDocument(merged);
-      await writeMeta({
+      await patchMeta({
         revision,
         lastSyncAt: timestamp,
         lastError: null,
         dirty: false,
+        ...(observedRemote ? { maxRemoteTs: remoteWatermark } : {}),
       });
       return { ok: true, changed };
     } catch (error) {
@@ -533,6 +569,18 @@ export function createSyncEngine({
     const remote = docOrNull === null
       ? null
       : normalizeDocument(docOrNull);
+    let remoteWatermark = null;
+    if (remote !== null) {
+      try {
+        remoteWatermark = acceptRemoteTimestamp(
+          remote,
+          storedRemoteWatermark(privateState.meta),
+        );
+      } catch (error) {
+        await fail(error);
+        throw error;
+      }
+    }
     let doc;
 
     if (privateState.doc !== null) {
@@ -549,6 +597,10 @@ export function createSyncEngine({
       doc = storageSnapshotToDoc(projectedState, undefined, timestamp);
     }
 
+    if (remoteWatermark !== null) {
+      await patchMeta({ maxRemoteTs: remoteWatermark });
+    }
+
     const documentChanged = await persistDocument(doc);
     const projectionChanged = remote === null
       ? false
@@ -557,6 +609,7 @@ export function createSyncEngine({
       || !documentsEqual(doc, remote);
     await patchMeta({
       dirty: differsFromRemote,
+      ...(remoteWatermark === null ? {} : { maxRemoteTs: remoteWatermark }),
       ...(documentChanged || projectionChanged ? { lastError: null } : {}),
     });
     return doc;
@@ -593,6 +646,9 @@ export function createSyncEngine({
       }
       const key = await deriveKey(passphrase, salt, iters);
       const remoteDoc = await decryptRemote(remote, key);
+      const currentMeta = normalizeMeta(
+        (await storage.local.get(SYNC_META_KEY))[SYNC_META_KEY],
+      );
 
       await keyStore.saveKey({ key, salt, iters: iters ?? 600_000 });
       await storage.local.set({
@@ -602,6 +658,9 @@ export function createSyncEngine({
           lastSyncAt: null,
           lastError: null,
           dirty: remote === null,
+          ...(storedRemoteWatermark(currentMeta) === null
+            ? {}
+            : { maxRemoteTs: currentMeta.maxRemoteTs }),
         },
       });
       await bootstrap(remoteDoc);

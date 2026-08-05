@@ -12,7 +12,7 @@ function tileHtml(id, videoId) {
   </ytd-rich-item-renderer>`;
 }
 
-function setup(markup, decide) {
+function setup(markup, decide, onCounts = () => {}) {
   const doc = html(markup);
   const applier = createApplier({
     root: doc.body,
@@ -24,7 +24,7 @@ function setup(markup, decide) {
     getState: () => ({
       subs: new Set(), blocklist: new Set(), watched: new Set(), locale: 'en',
     }),
-    onCounts: () => {},
+    onCounts,
   });
   return { doc, applier };
 }
@@ -51,6 +51,24 @@ test('counts hidden and visible tiles', () => {
   );
   applier.scan();
   assert.deepEqual(applier.getCounts(), { hidden: 2, visible: 1 });
+});
+
+test('reports matched tiles and null channel names for each scan', () => {
+  const reports = [];
+  const { applier } = setup(
+    tileHtml('a', 'video1') + tileHtml('b', 'video2'),
+    hideIf([]),
+    (counts) => reports.push(counts),
+  );
+
+  applier.scan();
+
+  assert.deepEqual(reports, [{
+    hidden: 0,
+    visible: 2,
+    totalMatchedTiles: 2,
+    nullChannelNameTiles: 2,
+  }]);
 });
 
 // Regression guard. readTile returns null for a nested tile, and scan()

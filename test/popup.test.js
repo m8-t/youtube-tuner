@@ -14,12 +14,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function popupDocument() {
   return html(`
     <input type="checkbox" id="enabled">
+    <small id="dom-health-status" class="status-line" hidden></small>
     <p id="subs-age"></p>
     <button id="refresh-subs" type="button">Refresh now</button>
     <div id="sync-row" hidden>
       <button id="sync-now" type="button">Sync now</button>
-      <small id="sync-status"></small>
-      <small id="sync-last-sync"></small>
+      <small id="sync-status" class="status-line"></small>
+      <small id="sync-last-sync" class="status-line"></small>
     </div>
     <button id="check-update" type="button">Check for updates</button>
     <p id="update-status" hidden></p>
@@ -66,6 +67,7 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       .map((element) => element.id),
     [
       'enabled',
+      'dom-health-status',
       'subs-age',
       'refresh-subs',
       'sync-row',
@@ -378,6 +380,31 @@ test('popup shows the sync row when sync is enabled', async () => {
   assert.equal(
     dependencies.documentObject.getElementById('sync-row').hidden,
     false,
+  );
+});
+
+test('popup renders degraded DOM health in the status palette', async () => {
+  const dependencies = popupDependencies({
+    sendMessage: async () => ({
+      enabled: false,
+      domHealth: 'degraded',
+    }),
+  });
+
+  await initializePopup(dependencies);
+
+  const warning = dependencies.documentObject.getElementById(
+    'dom-health-status',
+  );
+  const syncError = dependencies.documentObject.getElementById('sync-status');
+  assert.equal(warning.hidden, false);
+  assert.equal(
+    warning.textContent,
+    'Filtering may be broken by a YouTube page change',
+  );
+  assert.equal(
+    warning.classList.contains('status-line'),
+    syncError.classList.contains('status-line'),
   );
 });
 

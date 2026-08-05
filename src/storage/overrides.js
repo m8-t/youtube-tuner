@@ -43,7 +43,7 @@ function entries(overrides) {
   return Object.entries(overrides);
 }
 
-function normalizeOverrides(overrides) {
+export function normalizeOverrides(overrides) {
   const normalized = new Map();
   for (const [channelName, entry] of entries(overrides)) {
     const name = normalizeChannelName(channelName);

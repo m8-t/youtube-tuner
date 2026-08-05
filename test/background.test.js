@@ -9,7 +9,10 @@ const {
   POPUP_PATH,
   STALE_BADGE_COLOR,
   SUBS_COLLECTION_RESULT_MESSAGE,
+  createCountsMessageHandler,
+  createDomHealthState,
   createSubscriptionTabCoordinator,
+  createSyncMessageHandler,
   ensureSyncPullAlarm,
   createUpdateCheckRunner,
   refreshSubscriptionIndicators,
@@ -163,6 +166,48 @@ test('fresh count messages keep the hidden count and use the normal badge', () =
     tabId: 42,
     color: NORMAL_BADGE_COLOR,
   }]);
+});
+
+test('count DOM health is exposed for the active tab through sync status', async () => {
+  const domHealthState = createDomHealthState({
+    tabs: {
+      query: async (query) => {
+        assert.deepEqual(query, { active: true, currentWindow: true });
+        return [{ id: 41 }];
+      },
+    },
+  });
+  const badgeUpdates = [];
+  const handleCounts = createCountsMessageHandler({
+    domHealthState,
+    updateBadge: (message, tabId) => badgeUpdates.push([message, tabId]),
+  });
+  handleCounts({
+    type: 'counts',
+    hidden: 2,
+    enabled: true,
+    domHealth: 'degraded',
+  }, { tab: { id: 41 } });
+
+  const handleSync = createSyncMessageHandler({
+    engine: { status: async () => ({ enabled: false }) },
+    getDomHealth: () => domHealthState.active(),
+  });
+  const response = await new Promise((resolve) => {
+    assert.equal(
+      handleSync({ type: 'sync-status' }, {}, resolve),
+      true,
+    );
+  });
+
+  assert.deepEqual(response, {
+    enabled: false,
+    domHealth: 'degraded',
+  });
+  assert.equal(badgeUpdates.length, 1);
+
+  domHealthState.remove(41);
+  assert.equal(await domHealthState.active(), 'ok');
 });
 
 test('absent subscription indicators use amber and explain collection', async () => {

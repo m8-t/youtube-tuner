@@ -242,6 +242,7 @@ export async function initializePopup({
   const syncRow = documentObject.getElementById('sync-row');
   const syncButton = documentObject.getElementById('sync-now');
   const syncStatus = documentObject.getElementById('sync-status');
+  const domHealthStatus = documentObject.getElementById('dom-health-status');
   const optionsButton = documentObject.getElementById('open-options');
 
   let latestTag = null;
@@ -254,6 +255,14 @@ export async function initializePopup({
   syncRow.hidden = true;
   try {
     const status = await sendMessage({ type: 'sync-status' });
+    if (status?.domHealth === 'degraded') {
+      domHealthStatus.textContent =
+        'Filtering may be broken by a YouTube page change';
+      domHealthStatus.hidden = false;
+    } else {
+      domHealthStatus.textContent = '';
+      domHealthStatus.hidden = true;
+    }
     if (status?.enabled === true) {
       syncRow.hidden = false;
       renderLastSync(status.lastSyncAt, documentObject, now);

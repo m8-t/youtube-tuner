@@ -16,10 +16,12 @@ import {
 } from '../src/sync/document.js';
 import { merge } from '../src/sync/merge.js';
 import {
+  attachKeyMetadata,
   CryptoError,
   decrypt,
   deriveKey,
   encrypt,
+  parseHeader,
 } from '../src/sync/crypto.js';
 import {
   docToStorage,
@@ -28,6 +30,29 @@ import {
 
 const NOW = 2_000_000_000_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function encodeVarint(value) {
+  const bytes = [];
+  let remaining = value;
+  do {
+    let byte = remaining % 128;
+    remaining = Math.floor(remaining / 128);
+    if (remaining > 0) byte |= 0x80;
+    bytes.push(byte);
+  } while (remaining > 0);
+  return bytes;
+}
+
+function envelopeHeader(iters) {
+  const kdf = new TextEncoder().encode('PBKDF2-SHA256');
+  return Uint8Array.from([
+    1,
+    ...encodeVarint(kdf.length),
+    ...kdf,
+    ...encodeVarint(iters),
+    ...new Uint8Array(32),
+  ]);
+}
 
 function clock(ts, counter, actorId = 'actor-a') {
   return createClock(ts, counter, actorId);
@@ -213,6 +238,35 @@ test('encrypted envelope versions newer than v1 are rejected', async () => {
   const blob = await encrypt(create('actor-a'), key, { nonce: new Uint8Array(12) });
   blob[0] = 2;
   await assert.rejects(decrypt(blob, key), CryptoError);
+});
+
+test('encrypted envelope accepts the maximum PBKDF2 iteration count', () => {
+  assert.equal(parseHeader(envelopeHeader(10_000_000)).iters, 10_000_000);
+});
+
+test('encrypted envelope rejects excessive PBKDF2 iteration counts', () => {
+  assert.throws(
+    () => parseHeader(envelopeHeader(10_000_001)),
+    (error) => (
+      error instanceof CryptoError
+      && error.message === 'Excessive PBKDF2 iteration count: 10000001'
+    ),
+  );
+});
+
+test('key metadata rejects excessive PBKDF2 iteration counts', async () => {
+  const key = await globalThis.crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+  assert.throws(
+    () => attachKeyMetadata(key, new Uint8Array(32), 10_000_001),
+    (error) => (
+      error instanceof CryptoError
+      && error.message === 'Excessive PBKDF2 iteration count: 10000001'
+    ),
+  );
 });
 
 test('storage projection round-trips existing storage shapes', () => {

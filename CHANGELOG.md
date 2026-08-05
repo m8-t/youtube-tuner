@@ -3,6 +3,24 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.1.0] - 2026-08-05
+
+### Added
+
+- A DOM-breakage warning reports when YouTube page changes may have stopped
+  channel filtering from working.
+- CI runs the test suite on pushes to `main` and on pull requests.
+
+### Security
+
+- PBKDF2 iteration counts in encrypted sync data are capped to prevent
+  excessive key-derivation work from malicious inputs.
+- Sync rejects remote data older than state the device has already merged.
+
+### Fixed
+
+- Settings imports normalize channel overrides before saving them.
+
 ## 1.0.1 - 2026-08-05
 
 ### Fixed

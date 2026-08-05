@@ -3,6 +3,7 @@ import { parse, serialize } from './document.js';
 const VERSION = 1;
 const KDF = 'PBKDF2-SHA256';
 const DEFAULT_ITERS = 600_000;
+const MAX_PBKDF2_ITERATIONS = 10_000_000;
 const SALT_LENGTH = 32;
 const NONCE_LENGTH = 12;
 const textEncoder = new TextEncoder();
@@ -100,6 +101,9 @@ function decodeHeader(data) {
   decoded = decodeVarint(data, kdfEnd);
   const iters = decoded.value;
   if (iters <= 0) throw new CryptoError('Invalid PBKDF2 iteration count');
+  if (iters > MAX_PBKDF2_ITERATIONS) {
+    throw new CryptoError(`Excessive PBKDF2 iteration count: ${iters}`);
+  }
   const saltEnd = decoded.offset + SALT_LENGTH;
   if (saltEnd > data.length) throw new CryptoError('Truncated envelope header');
   return {
@@ -153,6 +157,9 @@ export function attachKeyMetadata(key, salt, iters) {
   }
   if (!Number.isSafeInteger(iters) || iters <= 0) {
     throw new CryptoError('Invalid PBKDF2 iteration count');
+  }
+  if (iters > MAX_PBKDF2_ITERATIONS) {
+    throw new CryptoError(`Excessive PBKDF2 iteration count: ${iters}`);
   }
   keyMetadata.set(key, { salt: new Uint8Array(saltBytes), iters });
   return key;
