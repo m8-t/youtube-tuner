@@ -3,7 +3,7 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
-## [1.4.2] - 2026-08-13
+## [1.4.3] - 2026-08-13
 
 ### Added
 
