@@ -70,8 +70,76 @@ jobs:
         run: |
           set -e
           TAG=${GITHUB_REF#refs/tags/}
+          TAG_VERSION=${TAG#v}
+          CHANGELOG_VERSION=$TAG_VERSION
           PRERELEASE=()
           case "$TAG" in
-            v*-beta.*) PRERELEASE=(--prerelease) ;;
+            v*-beta.*)
+              PRERELEASE=(--prerelease)
+              CHANGELOG_VERSION=$(printf '%s' "$TAG_VERSION" |
+                sed 's/-beta\.[0-9][0-9]*$//')
+              ;;
           esac
-          gh release create "$TAG" youtube-tuner-*.zip youtube-tuner-*.crx --title "Release $TAG" --generate-notes "${PRERELEASE[@]}"
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          if awk -v version="$CHANGELOG_VERSION" '
+            BEGIN {
+              heading = "## [" version "] - "
+              date_pattern = "^[0-9][0-9][0-9][0-9]-"
+              date_pattern = date_pattern "[0-9][0-9]-[0-9][0-9][[:space:]]*$"
+            }
+            index($0, "## [") == 1 {
+              if (found) exit
+              date = substr($0, length(heading) + 1)
+              if (index($0, heading) == 1 && date ~ date_pattern) {
+                found = 1
+              }
+              next
+            }
+            found {
+              if ($0 ~ /^[[:space:]]*$/) {
+                if (started) blank_lines++
+                next
+              }
+              while (blank_lines > 0) {
+                print ""
+                blank_lines--
+              }
+              print
+              started = 1
+            }
+            END {
+              if (!found) exit 1
+              if (!started) exit 2
+            }
+          ' CHANGELOG.md > "$NOTES_FILE"; then
+            NOTES=(--notes-file "$NOTES_FILE")
+          else
+            EXTRACTION_STATUS=$?
+            case "$TAG" in
+              v*-beta.*)
+                if [ "$EXTRACTION_STATUS" -eq 2 ]; then
+                  printf 'Warning: CHANGELOG section for %s is empty; ' \
+                    "$TAG" >&2
+                else
+                  printf 'Warning: no CHANGELOG section found for %s; ' \
+                    "$TAG" >&2
+                fi
+                printf 'falling back to generated notes.\n' >&2
+                NOTES=(--generate-notes)
+                ;;
+              *)
+                if [ "$EXTRACTION_STATUS" -eq 2 ]; then
+                  printf 'CHANGELOG section for %s is empty; ' "$TAG" >&2
+                  printf 'add release notes below ## [%s] - YYYY-MM-DD.\n' \
+                    "$CHANGELOG_VERSION" >&2
+                else
+                  printf 'No CHANGELOG section found for %s; ' "$TAG" >&2
+                  printf 'add a ## [%s] - YYYY-MM-DD section.\n' \
+                    "$CHANGELOG_VERSION" >&2
+                fi
+                exit 1
+                ;;
+            esac
+          fi
+          gh release create "$TAG" youtube-tuner-*.zip youtube-tuner-*.crx \
+            --title "Release $TAG" "${NOTES[@]}" "${PRERELEASE[@]}"
