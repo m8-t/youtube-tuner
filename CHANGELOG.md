@@ -18,6 +18,7 @@ Notable changes per release. Older releases are documented on the
   The driver still opens the real menu, it is just hidden while it does.
 - Videos from subscribed channels have no block button, which left a gap in the
   button stack. The Watch later button now sits in that slot instead.
+- The tile buttons are evenly spaced. The first gap was wider than the second.
 
 ### Known limitations
 

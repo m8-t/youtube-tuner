@@ -32,9 +32,9 @@ export function injectStyles(doc) {
     }
     /* Compact sidebar lockups are ~100px tall, so all three controls must fit. */
     .${NOT_INTERESTED_BUTTON_CLASS} { top: 6px; }
-    .${BLOCK_BUTTON_CLASS} { top: 46px; }
-    .${WATCH_LATER_BUTTON_CLASS} { top: 74px; }
-    .${NO_BLOCK_CLASS} .${WATCH_LATER_BUTTON_CLASS} { top: 46px; }
+    .${BLOCK_BUTTON_CLASS} { top: 34px; }
+    .${WATCH_LATER_BUTTON_CLASS} { top: 62px; }
+    .${NO_BLOCK_CLASS} .${WATCH_LATER_BUTTON_CLASS} { top: 34px; }
     .${BLOCK_HOST_CLASS}:hover > .${BLOCK_BUTTON_CLASS},
     .${BLOCK_HOST_CLASS}:hover > .${NOT_INTERESTED_BUTTON_CLASS},
     .${BLOCK_HOST_CLASS}:hover > .${WATCH_LATER_BUTTON_CLASS},
