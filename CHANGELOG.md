@@ -12,6 +12,11 @@ Notable changes per release. Older releases are documented on the
   so the video lands in the real playlist without opening the 3-dot menu. Home
   feed tiles are unchanged, they already carry YouTube's native hover button.
 
+### Fixed
+
+- YouTube's 3-dot menu no longer flashes on screen while a button action runs.
+  The driver still opens the real menu, it is just hidden while it does.
+
 ### Known limitations
 
 - Only the German menu label is verified against a live capture. On an English

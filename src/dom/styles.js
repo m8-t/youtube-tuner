@@ -6,6 +6,7 @@ import {
   WATCH_LATER_BUTTON_CLASS,
 } from './block-button.js';
 import { COLLAPSED_SECTION_CLASS } from './empty-sections.js';
+import { MENU_CLOAK_CLASS } from './native-menu.js';
 
 export function injectStyles(doc) {
   if (doc.getElementById('ytt-styles')) return;
@@ -14,6 +15,10 @@ export function injectStyles(doc) {
   style.textContent = `
     .${HIDDEN_CLASS} { display: none !important; }
     .${COLLAPSED_SECTION_CLASS} { display: none !important; }
+    .${MENU_CLOAK_CLASS} tp-yt-iron-dropdown {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
     .${BLOCK_HOST_CLASS} { position: relative; }
     .${BLOCK_BUTTON_CLASS},
     .${NOT_INTERESTED_BUTTON_CLASS},

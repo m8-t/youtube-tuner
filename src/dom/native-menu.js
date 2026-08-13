@@ -12,6 +12,8 @@ export const MENU_STRINGS = {
   ],
 };
 
+export const MENU_CLOAK_CLASS = 'ytt-menu-cloak';
+
 const MENU_TRIGGER_SELECTOR =
   '.ytLockupMetadataViewModelMenuButton button';
 const MENU_ITEM_SELECTOR =
@@ -120,6 +122,11 @@ export async function runNativeMenuAction({
       sendEscape(doc);
       return false;
     }
+    try {
+      doc.documentElement.classList.add(MENU_CLOAK_CLASS);
+    } catch {
+      // Cloaking is cosmetic and must never prevent the menu action.
+    }
     trigger.click();
 
     const items = await waitForVisibleMenuItems({
@@ -150,6 +157,11 @@ export async function runNativeMenuAction({
     sendEscape(doc);
     return false;
   } finally {
+    try {
+      doc?.documentElement?.classList.remove(MENU_CLOAK_CLASS);
+    } catch {
+      // Cloaking is cosmetic and must never prevent cleanup.
+    }
     inFlight = false;
   }
 }

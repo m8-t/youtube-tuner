@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { html } from './helpers/dom.js';
 import {
+  MENU_CLOAK_CLASS,
   MENU_STRINGS,
   runNativeMenuAction,
 } from '../src/dom/native-menu.js';
@@ -90,6 +91,58 @@ test('native menu clicks exact "Kein Interesse" match on row 6 only', async () =
 
   assert.equal(acted, true);
   assert.deepEqual(getClicked(), [6]);
+});
+
+test('native menu cloak is present when the matching row is clicked', async () => {
+  const { doc, tile, getRows } = setupPopupOnTrigger();
+  let wasCloakedWhenClicked = false;
+  doc.querySelector('#trigger').addEventListener('click', () => {
+    getRows()[5].addEventListener('click', () => {
+      wasCloakedWhenClicked = doc.documentElement.classList.contains(
+        MENU_CLOAK_CLASS,
+      );
+    });
+  });
+
+  const acted = await runNativeMenuAction({
+    tile,
+    action: 'notInterested',
+    doc,
+    isVisible: () => true,
+  });
+
+  assert.equal(acted, true);
+  assert.equal(wasCloakedWhenClicked, true);
+});
+
+test('native menu cloak is removed after a successful action', async () => {
+  const { doc, tile } = setupPopupOnTrigger();
+
+  const acted = await runNativeMenuAction({
+    tile,
+    action: 'notInterested',
+    doc,
+    isVisible: () => true,
+  });
+
+  assert.equal(acted, true);
+  assert.equal(doc.documentElement.classList.contains(MENU_CLOAK_CLASS), false);
+});
+
+test('native menu cloak is removed after a failed action', async () => {
+  const labels = [...MENU_LABELS];
+  labels[5] = 'Kein Interesse!';
+  const { doc, tile } = setupPopupOnTrigger(labels);
+
+  const acted = await runNativeMenuAction({
+    tile,
+    action: 'notInterested',
+    doc,
+    isVisible: () => true,
+  });
+
+  assert.equal(acted, false);
+  assert.equal(doc.documentElement.classList.contains(MENU_CLOAK_CLASS), false);
 });
 
 test('native menu clicks exact channel recommendation match on row 7', async () => {
