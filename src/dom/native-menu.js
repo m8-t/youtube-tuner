@@ -9,7 +9,7 @@ export const MENU_STRINGS = {
 const MENU_TRIGGER_SELECTOR =
   '.ytLockupMetadataViewModelMenuButton button';
 const MENU_ITEM_SELECTOR =
-  'yt-list-item-view-model.ytListItemViewModelHost[role="menuitem"]';
+  'yt-list-item-view-model.ytListItemViewModelHost[role="menuitem"], yt-list-item-view-model [role="menuitem"]';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_POLL_INTERVAL_MS = 25;
 
@@ -29,20 +29,35 @@ export function isVisibleInBrowser(element) {
 function sendEscape(doc) {
   try {
     const KeyboardEvent = doc.defaultView?.KeyboardEvent;
-    if (!KeyboardEvent) return;
-    doc.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      code: 'Escape',
-      bubbles: true,
-      cancelable: true,
-    }));
+    const target = doc.activeElement ?? doc.body;
+    if (!KeyboardEvent || !target) return;
+    for (const type of ['keydown', 'keyup']) {
+      target.dispatchEvent(new KeyboardEvent(type, {
+        key: 'Escape',
+        code: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }));
+    }
   } catch {
     // Closing is best-effort; never compensate by clicking a menu item.
   }
 }
 
 function visibleMenuItems(doc, isVisible) {
-  return [...doc.querySelectorAll(MENU_ITEM_SELECTOR)].filter(isVisible);
+  const items = [...doc.querySelectorAll(MENU_ITEM_SELECTOR)];
+  return items
+    .filter((item) => !items.some((other) => (
+      other !== item && item.contains(other)
+    )))
+    .filter(isVisible);
+}
+
+function normalizeMenuText(text) {
+  return String(text ?? '')
+    .replace(/[\u00a0\p{Zs}]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
 }
 
 function waitForVisibleMenuItems({
@@ -113,8 +128,10 @@ export async function runNativeMenuAction({
     }
 
     const targets = items.filter((item) => {
-      const text = item.textContent?.trim();
-      return expectedStrings.some((expected) => text === expected);
+      const text = normalizeMenuText(item.textContent);
+      return expectedStrings.some((expected) => (
+        text === normalizeMenuText(expected)
+      ));
     });
     if (targets.length !== 1) {
       sendEscape(doc);

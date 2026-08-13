@@ -3,6 +3,17 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.4.1] - 2026-08-13
+
+### Fixed
+
+- Native menu actions work again after YouTube moved `role="menuitem"` from the
+  menu-row host element onto its inner button. Both the thumbs-down and the
+  block button silently did nothing but leave YouTube's menu open; the block
+  button also left the video hidden with no way back, because YouTube's blocked
+  tile with its Undo button never rendered.
+- The menu now closes when an action cannot be completed.
+
 ## [1.4.0] - 2026-08-05
 
 ### Added
