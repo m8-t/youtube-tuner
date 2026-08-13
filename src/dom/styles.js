@@ -2,6 +2,7 @@ import { HIDDEN_CLASS } from './applier.js';
 import {
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
+  NO_BLOCK_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
   WATCH_LATER_BUTTON_CLASS,
 } from './block-button.js';
@@ -33,6 +34,7 @@ export function injectStyles(doc) {
     .${NOT_INTERESTED_BUTTON_CLASS} { top: 6px; }
     .${BLOCK_BUTTON_CLASS} { top: 46px; }
     .${WATCH_LATER_BUTTON_CLASS} { top: 74px; }
+    .${NO_BLOCK_CLASS} .${WATCH_LATER_BUTTON_CLASS} { top: 46px; }
     .${BLOCK_HOST_CLASS}:hover > .${BLOCK_BUTTON_CLASS},
     .${BLOCK_HOST_CLASS}:hover > .${NOT_INTERESTED_BUTTON_CLASS},
     .${BLOCK_HOST_CLASS}:hover > .${WATCH_LATER_BUTTON_CLASS},

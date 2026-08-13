@@ -6,6 +6,7 @@ import {
   disarmNativeUndo,
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
+  NO_BLOCK_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
   WATCH_LATER_BUTTON_CLASS,
   readNativeUndo,
@@ -195,10 +196,11 @@ test('does not add a button when shouldOffer returns false', () => {
     tile('a', 'video1', 'Subscribed Channel'),
     () => false,
   );
-  run();
+  run({ offerWatchLater: true });
 
   assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
   assert.ok(doc.querySelector('#a').classList.contains(BLOCK_HOST_CLASS));
+  assert.ok(doc.querySelector('#a').classList.contains(NO_BLOCK_CLASS));
 });
 
 test('subscribed tiles show not-interested but suppress block-channel', () => {
@@ -222,9 +224,30 @@ test('adds a button when shouldOffer returns true', () => {
     tile('a', 'video1', 'Other Channel'),
     () => true,
   );
-  run();
+  run({ offerWatchLater: true });
 
   assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
+  assert.equal(doc.querySelector('#a').classList.contains(NO_BLOCK_CLASS), false);
+});
+
+test('RECYCLING: updates the no-block class when the offer state flips', () => {
+  let offered = true;
+  const { doc, run } = setup(
+    tile('a', 'video1', 'Some Channel'),
+    () => offered,
+  );
+  const element = doc.querySelector('#a');
+
+  run({ offerWatchLater: true });
+  assert.equal(element.classList.contains(NO_BLOCK_CLASS), false);
+
+  offered = false;
+  run({ offerWatchLater: true });
+  assert.ok(element.classList.contains(NO_BLOCK_CLASS));
+
+  offered = true;
+  run({ offerWatchLater: true });
+  assert.equal(element.classList.contains(NO_BLOCK_CLASS), false);
 });
 
 test('omitting shouldOffer preserves the default button behavior', () => {

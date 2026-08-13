@@ -2,6 +2,7 @@ import { runNativeMenuAction } from './native-menu.js';
 
 export const BLOCK_BUTTON_CLASS = 'ytt-block';
 export const BLOCK_HOST_CLASS = 'ytt-block-host';
+export const NO_BLOCK_CLASS = 'ytt-no-block';
 export const NOT_INTERESTED_BUTTON_CLASS = 'ytt-not-interested';
 export const WATCH_LATER_BUTTON_CLASS = 'ytt-watch-later';
 
@@ -177,6 +178,7 @@ export function attachBlockButtons({
 
     // Give the absolutely positioned controls a stable positioning context.
     element.classList.add(BLOCK_HOST_CLASS);
+    element.classList.toggle(NO_BLOCK_CLASS, !button);
 
     // YouTube may have recycled this tile for a different channel.
     notInterestedButton.dataset.videoId = tile.videoId;
