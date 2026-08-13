@@ -3,6 +3,21 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.4.2] - 2026-08-13
+
+### Added
+
+- A "Watch later" button on watch-page sidebar videos, next to the thumbs-down
+  and block buttons. It clicks YouTube's own "Save to Watch later" menu entry,
+  so the video lands in the real playlist without opening the 3-dot menu. Home
+  feed tiles are unchanged, they already carry YouTube's native hover button.
+
+### Known limitations
+
+- Only the German menu label is verified against a live capture. On an English
+  interface the button may do nothing until the label is confirmed; as with
+  every native menu action it fails closed and never clicks a different row.
+
 ## [1.4.1] - 2026-08-13
 
 ### Fixed

@@ -4,6 +4,12 @@ export const MENU_STRINGS = {
     'Keine Videos von diesem Kanal empfehlen',
     "Don't recommend channel",
   ],
+  watchLater: [
+    'Zu „Später ansehen“ hinzufügen',
+    // English label unverified against a live capture.
+    'Save to Watch later',
+    'Save to Watch Later',
+  ],
 };
 
 const MENU_TRIGGER_SELECTOR =

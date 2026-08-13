@@ -3,6 +3,7 @@ import { runNativeMenuAction } from './native-menu.js';
 export const BLOCK_BUTTON_CLASS = 'ytt-block';
 export const BLOCK_HOST_CLASS = 'ytt-block-host';
 export const NOT_INTERESTED_BUTTON_CLASS = 'ytt-not-interested';
+export const WATCH_LATER_BUTTON_CLASS = 'ytt-watch-later';
 
 const nativeUndoArms = new WeakMap();
 
@@ -55,6 +56,7 @@ export function attachBlockButtons({
   onBlock,
   doc,
   shouldOffer = () => true,
+  offerWatchLater = false,
   onNativeAction = runNativeMenuAction,
   registry = nativeUndoRegistry,
 }) {
@@ -70,6 +72,8 @@ export function attachBlockButtons({
     let button = element.querySelector(`.${BLOCK_BUTTON_CLASS}`);
     let notInterestedButton =
       element.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`);
+    let watchLaterButton =
+      element.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`);
     let offered = true;
     if (tile.channelName) {
       try {
@@ -84,6 +88,11 @@ export function attachBlockButtons({
     if (!offered) {
       button?.remove();
       button = null;
+    }
+
+    if (!offerWatchLater) {
+      watchLaterButton?.remove();
+      watchLaterButton = null;
     }
 
     if (!notInterestedButton) {
@@ -144,11 +153,36 @@ export function attachBlockButtons({
       element.appendChild(button);
     }
 
+    if (offerWatchLater && !watchLaterButton) {
+      watchLaterButton = doc.createElement('button');
+      watchLaterButton.className = WATCH_LATER_BUTTON_CLASS;
+      watchLaterButton.type = 'button';
+      watchLaterButton.textContent = '\u{1F552}';
+      watchLaterButton.title = 'Save to Watch later';
+      watchLaterButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          Promise.resolve(onNativeAction({
+            tile: element,
+            action: 'watchLater',
+            doc,
+          })).catch(() => {});
+        } catch {
+          // Native actions fail closed and must not affect local state.
+        }
+      });
+      element.appendChild(watchLaterButton);
+    }
+
     // Give the absolutely positioned controls a stable positioning context.
     element.classList.add(BLOCK_HOST_CLASS);
 
     // YouTube may have recycled this tile for a different channel.
     notInterestedButton.dataset.videoId = tile.videoId;
+    if (watchLaterButton) {
+      watchLaterButton.dataset.videoId = tile.videoId;
+    }
     if (button) {
       button.dataset.channelName = tile.channelName;
       button.title = `Block ${tile.channelName}`;

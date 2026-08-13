@@ -106,6 +106,20 @@ test('native menu clicks exact channel recommendation match on row 7', async () 
   assert.deepEqual(getClicked(), [7]);
 });
 
+test('native menu clicks exact watch-later match on row 2', async () => {
+  const { doc, tile, getClicked } = setupPopupOnTrigger();
+
+  const acted = await runNativeMenuAction({
+    tile,
+    action: 'watchLater',
+    doc,
+    isVisible: () => true,
+  });
+
+  assert.equal(acted, true);
+  assert.deepEqual(getClicked(), [2]);
+});
+
 test('native menu still clicks a legacy host-role menu item', async () => {
   const { doc, tile, getClicked } = setupPopupOnTrigger(
     MENU_LABELS,

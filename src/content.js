@@ -323,6 +323,7 @@ export function createFilteringLifecycle({
       tileSelector: TILE_SELECTOR,
       readTile,
       doc: documentObject,
+      offerWatchLater: getPathname() === '/watch',
       shouldOffer: (channelName) => {
         const { subs } = getState();
         return subs === null || !subs.has(channelName.trim());

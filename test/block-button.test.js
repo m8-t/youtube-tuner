@@ -7,6 +7,7 @@ import {
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
+  WATCH_LATER_BUTTON_CLASS,
   readNativeUndo,
 } from '../src/dom/block-button.js';
 import { readTile, TILE_SELECTOR } from '../src/dom/tile-adapter.js';
@@ -15,13 +16,14 @@ function setup(markup, shouldOffer) {
   const doc = html(markup);
   const blocked = [];
   const nativeActions = [];
-  const run = () => {
+  const run = ({ offerWatchLater = false } = {}) => {
     const options = {
       root: doc.body,
       tileSelector: TILE_SELECTOR,
       readTile,
       onBlock: (name) => blocked.push(name),
       onNativeAction: (request) => nativeActions.push(request.action),
+      offerWatchLater,
       doc,
     };
     if (shouldOffer !== undefined) options.shouldOffer = shouldOffer;
@@ -110,6 +112,61 @@ test('is idempotent across repeated scans', () => {
   run();
 
   assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
+});
+
+test('adds a watch-later button when it is offered', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run({ offerWatchLater: true });
+
+  const button = doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`);
+  assert.ok(button);
+  assert.equal(button.type, 'button');
+  assert.equal(button.textContent, '\u{1F552}');
+  assert.equal(button.title, 'Save to Watch later');
+  assert.equal(button.dataset.videoId, 'video1');
+});
+
+test('does not add a watch-later button when it is not offered', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run({ offerWatchLater: false });
+
+  assert.equal(
+    doc.querySelectorAll(`.${WATCH_LATER_BUTTON_CLASS}`).length,
+    0,
+  );
+});
+
+test('RECYCLING: removes a watch-later button when it is no longer offered', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run({ offerWatchLater: true });
+  assert.ok(doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`));
+
+  run({ offerWatchLater: false });
+
+  assert.equal(doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`), null);
+});
+
+test('watch-later uses only the native action without blocking or arming undo', () => {
+  const doc = html(tile('a', 'video1', 'Some Channel'));
+  const blocked = [];
+  const nativeActions = [];
+  const armed = [];
+  attachBlockButtons({
+    root: doc.body,
+    tileSelector: TILE_SELECTOR,
+    readTile,
+    onBlock: (name) => blocked.push(name),
+    onNativeAction: (request) => nativeActions.push(request.action),
+    offerWatchLater: true,
+    registry: { arm: (...args) => armed.push(args) },
+    doc,
+  });
+
+  doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`).click();
+
+  assert.deepEqual(nativeActions, ['watchLater']);
+  assert.deepEqual(blocked, []);
+  assert.deepEqual(armed, []);
 });
 
 test('a recycled tile reports its new channel', () => {
