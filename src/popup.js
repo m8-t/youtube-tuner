@@ -258,6 +258,9 @@ export async function initializePopup({
   const syncButton = documentObject.getElementById('sync-now');
   const syncStatus = documentObject.getElementById('sync-status');
   const domHealthStatus = documentObject.getElementById('dom-health-status');
+  const titleBlockForm = documentObject.getElementById('title-block-form');
+  const titleBlockInput = documentObject.getElementById('title-block-input');
+  const titleBlockStatus = documentObject.getElementById('title-block-status');
   const optionsButton = documentObject.getElementById('open-options');
   const helpPanel = documentObject.getElementById('help-panel');
   const helpDismissButton = documentObject.getElementById('help-dismiss');
@@ -312,6 +315,39 @@ export async function initializePopup({
   helpToggle.addEventListener('click', (event) => {
     event.preventDefault();
     helpPanel.hidden = !helpPanel.hidden;
+  });
+
+  titleBlockForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const phrase = titleBlockInput.value.trim();
+    if (phrase.length === 0) return;
+
+    void (async () => {
+      try {
+        const latestConfig = await loadConfiguration();
+        latestConfig.titleRule ??= {};
+        const patterns = Array.isArray(latestConfig.titleRule.patterns)
+          ? latestConfig.titleRule.patterns
+          : [];
+        const normalizedPhrase = phrase.toLowerCase();
+        const alreadyBlocked = patterns.some((pattern) =>
+          typeof pattern === 'string' &&
+          pattern.toLowerCase() === normalizedPhrase,
+        );
+        if (alreadyBlocked) {
+          titleBlockStatus.textContent = 'Already blocked.';
+          titleBlockInput.value = '';
+          return;
+        }
+
+        latestConfig.titleRule.patterns = [...patterns, phrase];
+        await saveConfiguration(latestConfig);
+        titleBlockStatus.textContent = 'Blocked.';
+        titleBlockInput.value = '';
+      } catch {
+        titleBlockStatus.textContent = 'Could not save.';
+      }
+    })();
   });
 
   enabledToggle.addEventListener('change', () => {

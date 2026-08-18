@@ -20,6 +20,11 @@ function popupDocument() {
       <button id="help-dismiss" type="button">Got it</button>
     </section>
     <small id="dom-health-status" class="status-line" hidden></small>
+    <form id="title-block-form">
+      <input type="text" id="title-block-input">
+      <button type="submit">Add to blocked titles</button>
+      <small id="title-block-status" class="status-line"></small>
+    </form>
     <p id="subs-age"></p>
     <button id="refresh-subs" type="button">Refresh now</button>
     <div id="sync-row" hidden>
@@ -80,6 +85,9 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'help-panel',
       'help-dismiss',
       'dom-health-status',
+      'title-block-form',
+      'title-block-input',
+      'title-block-status',
       'subs-age',
       'refresh-subs',
       'sync-row',
@@ -93,6 +101,121 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'help-toggle',
     ],
   );
+});
+
+test('popup adds a title-blocking phrase from the quick-add form', async () => {
+  let loadCalls = 0;
+  const saved = [];
+  const dependencies = popupDependencies({
+    loadConfiguration: async () => {
+      loadCalls += 1;
+      return {
+        enabled: true,
+        titleRule: { enabled: true, patterns: [] },
+        updateCheck: { enabled: true },
+      };
+    },
+    saveConfiguration: async (config) => {
+      saved.push(structuredClone(config));
+    },
+  });
+  await initializePopup(dependencies);
+  const input = dependencies.documentObject.getElementById(
+    'title-block-input',
+  );
+  input.value = 'Spoiler Alert';
+
+  dependencies.documentObject.getElementById('title-block-form')
+    .requestSubmit();
+  await settleEvents();
+
+  assert.equal(loadCalls, 2);
+  assert.deepEqual(saved[0].titleRule.patterns, ['Spoiler Alert']);
+  assert.equal(input.value, '');
+  assert.equal(
+    dependencies.documentObject.getElementById('title-block-status')
+      .textContent,
+    'Blocked.',
+  );
+});
+
+test('popup does not add a case-insensitive duplicate title phrase', async () => {
+  const saved = [];
+  const dependencies = popupDependencies({
+    loadConfiguration: async () => ({
+      enabled: true,
+      titleRule: { enabled: true, patterns: ['Spoiler Alert'] },
+      updateCheck: { enabled: true },
+    }),
+    saveConfiguration: async (config) => {
+      saved.push(structuredClone(config));
+    },
+  });
+  await initializePopup(dependencies);
+  const input = dependencies.documentObject.getElementById(
+    'title-block-input',
+  );
+  input.value = 'spoiler alert';
+
+  dependencies.documentObject.getElementById('title-block-form')
+    .requestSubmit();
+  await settleEvents();
+
+  assert.deepEqual(saved, []);
+  assert.equal(input.value, '');
+  assert.equal(
+    dependencies.documentObject.getElementById('title-block-status')
+      .textContent,
+    'Already blocked.',
+  );
+});
+
+test('popup ignores a whitespace-only title phrase', async () => {
+  let saveCalls = 0;
+  const dependencies = popupDependencies({
+    saveConfiguration: async () => {
+      saveCalls += 1;
+    },
+  });
+  await initializePopup(dependencies);
+  const input = dependencies.documentObject.getElementById(
+    'title-block-input',
+  );
+  const status = dependencies.documentObject.getElementById(
+    'title-block-status',
+  );
+  input.value = '   \t  ';
+  status.textContent = 'Unchanged';
+
+  dependencies.documentObject.getElementById('title-block-form')
+    .requestSubmit();
+  await settleEvents();
+
+  assert.equal(saveCalls, 0);
+  assert.equal(status.textContent, 'Unchanged');
+});
+
+test('popup replaces invalid title patterns when adding a phrase', async () => {
+  const saved = [];
+  const dependencies = popupDependencies({
+    loadConfiguration: async () => ({
+      enabled: true,
+      titleRule: { enabled: true, patterns: 'not-an-array' },
+      updateCheck: { enabled: true },
+    }),
+    saveConfiguration: async (config) => {
+      saved.push(structuredClone(config));
+    },
+  });
+  await initializePopup(dependencies);
+  dependencies.documentObject.getElementById('title-block-input').value =
+    'Fresh phrase';
+
+  dependencies.documentObject.getElementById('title-block-form')
+    .requestSubmit();
+  await settleEvents();
+
+  assert.deepEqual(saved[0].titleRule.patterns, ['Fresh phrase']);
 });
 
 test('popup includes the exact help and subscribed-exemption copy', () => {

@@ -13,6 +13,8 @@ Notable changes per release. Older releases are documented on the
   rules this also applies to videos from subscribed channels, so unwanted
   series from a channel you follow disappear from the subscriptions page too.
   The list syncs like the rest of the settings.
+- A quick-add field in the popup: type a phrase, hit "Add to blocked
+  titles", done. Duplicates are detected case-insensitively.
 
 ## [1.4.3] - 2026-08-13
 

@@ -83,6 +83,17 @@
       a { color: var(--link-color); }
       small, .explanation { color: var(--muted-text-color); }
       .status-line { display: block; }
+      input[type="text"] {
+        background: var(--bg-color);
+        border: 1px solid var(--control-border);
+        border-radius: 6px;
+        box-sizing: border-box;
+        color: var(--text-color);
+        font: inherit;
+        margin-bottom: .8em;
+        padding: .45em .85em;
+        width: 100%;
+      }
       input[type="checkbox"] {
         appearance: none;
         background: var(--toggle-bg);
@@ -147,6 +158,13 @@
       <button id="help-dismiss" type="button">Got it</button>
     </section>
     <small id="dom-health-status" class="status-line" hidden></small>
+
+    <hr>
+    <form id="title-block-form">
+      <input type="text" id="title-block-input" placeholder="Phrase to block in titles">
+      <button type="submit">Add to blocked titles</button>
+      <small id="title-block-status" class="status-line"></small>
+    </form>
 
     <hr>
 
