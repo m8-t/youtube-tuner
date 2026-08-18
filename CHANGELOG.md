@@ -15,6 +15,9 @@ Notable changes per release. Older releases are documented on the
   The list syncs like the rest of the settings.
 - A quick-add field in the popup: type a phrase, hit "Add to blocked
   titles", done. Duplicates are detected case-insensitively.
+- Filtering now also runs on the subscriptions page. Blocked titles apply
+  there, and so does the watched-videos rule; the age and view rules
+  continue to skip subscribed channels.
 
 ## [1.4.3] - 2026-08-13
 

@@ -172,7 +172,7 @@ export function createRuntimeLifeline({
 }
 
 export function isSupportedRoute(pathname) {
-  return pathname === '/' || pathname === '/watch';
+  return pathname === '/' || pathname === '/watch' || pathname === '/feed/subscriptions';
 }
 
 export function createDomHealthCanary() {

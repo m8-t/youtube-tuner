@@ -134,12 +134,12 @@ function createTimerHarness() {
   };
 }
 
-test('filtering routes are exactly the home feed and watch page', () => {
+test('filtering routes are exactly the home feed, watch page, and subscriptions feed', () => {
   assert.equal(isSupportedRoute('/'), true);
   assert.equal(isSupportedRoute('/watch'), true);
+  assert.equal(isSupportedRoute('/feed/subscriptions'), true);
   for (const pathname of [
     '/results',
-    '/feed/subscriptions',
     '/@handle',
     '/playlist',
     '/feed/channels',
