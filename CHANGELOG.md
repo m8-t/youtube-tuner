@@ -3,6 +3,17 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.4.4] - 2026-08-18
+
+### Added
+
+- Title-based blocking. The options page has a new "Blocked titles" list, one
+  phrase per line; any video whose title contains a phrase is hidden
+  (case-insensitive, matches anywhere in the title). Unlike the age and view
+  rules this also applies to videos from subscribed channels, so unwanted
+  series from a channel you follow disappear from the subscriptions page too.
+  The list syncs like the rest of the settings.
+
 ## [1.4.3] - 2026-08-13
 
 ### Added

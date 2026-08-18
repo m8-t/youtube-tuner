@@ -88,6 +88,7 @@ const FIELDS = [
   ['view-grace', 'valueAsNumber', (c) => c.viewRule.graceHours, (c, v) => { c.viewRule.graceHours = v; }],
   ['watched-enabled', 'checked', (c) => c.watchedRule.enabled, (c, v) => { c.watchedRule.enabled = v; }],
   ['block-enabled', 'checked', (c) => c.blocklistRule.enabled, (c, v) => { c.blocklistRule.enabled = v; }],
+  ['title-enabled', 'checked', (c) => c.titleRule.enabled, (c, v) => { c.titleRule.enabled = v; }],
 ];
 
 let config;
@@ -185,6 +186,13 @@ export async function renderStatus(refreshResult = null) {
 async function renderManualSubs() {
   const manual = await loadManualSubs();
   el('manual-subs').value = [...manual].join('\n');
+}
+
+function renderTitleFilters() {
+  const patterns = Array.isArray(config.titleRule.patterns)
+    ? config.titleRule.patterns.filter((pattern) => typeof pattern === 'string')
+    : [];
+  el('title-filters').value = patterns.join('\n');
 }
 
 function overrideMode(rule) {
@@ -708,6 +716,7 @@ function importSuccessMessage(settings) {
 async function rerenderImportedSettings() {
   config = await loadConfig();
   render();
+  renderTitleFilters();
   await Promise.all([
     renderBlocklist(),
     renderStatus(),
@@ -919,9 +928,10 @@ export async function runManualSubscriptionRefresh({
   }
 }
 
-async function main() {
+export async function main() {
   config = await loadConfig();
   render();
+  renderTitleFilters();
   await Promise.all([
     renderBlocklist(),
     renderStatus(),
@@ -942,6 +952,18 @@ async function main() {
     await saveManualSubs(names);
     await Promise.all([renderManualSubs(), renderStatus()]);
     el('manual-subs-status').textContent = 'Saved.';
+  });
+
+  el('title-filters-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const patterns = el('title-filters').value
+      .split(/\r?\n/)
+      .map((pattern) => pattern.trim())
+      .filter(Boolean);
+    config.titleRule.patterns = [...new Set(patterns)];
+    await saveConfig(config);
+    renderTitleFilters();
+    el('title-filters-status').textContent = 'Saved.';
   });
 
   el('watched-clear').addEventListener('click', async () => {

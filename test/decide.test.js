@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from '../src/rules/defaults.js';
 
 const tile = (over = {}) => ({
   videoId: 'abc123',
+  title: 'An ordinary video title',
   channelName: 'Some Channel',
   ageText: '2 days ago',
   viewText: '50,000 views',
@@ -36,6 +37,106 @@ test('master switch off shows everything', () => {
 test('blocked channel wins over everything', () => {
   const s = state({ blocklist: new Set(['Some Channel']), subs: new Set(['Some Channel']) });
   assert.deepEqual(decide(tile(), DEFAULT_CONFIG, s), { hide: true, reason: 'blocked' });
+});
+
+test('a blocked title is hidden with the title reason', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['An ordinary video title'] },
+  };
+  assert.deepEqual(decide(tile(), config, state()), {
+    hide: true, reason: 'title',
+  });
+});
+
+test('title matching is case-insensitive', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['ORDINARY VIDEO'] },
+  };
+  assert.deepEqual(decide(tile(), config, state()), {
+    hide: true, reason: 'title',
+  });
+});
+
+test('a blocked phrase matches in the middle of a title', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['video'] },
+  };
+  assert.deepEqual(decide(tile(), config, state()), {
+    hide: true, reason: 'title',
+  });
+});
+
+test('title blocking applies to subscribed channels', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['ordinary'] },
+  };
+  const s = state({ subs: new Set(['Some Channel']) });
+  assert.deepEqual(decide(tile(), config, s), {
+    hide: true, reason: 'title',
+  });
+});
+
+test('the blocklist remains ahead of title blocking', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['ordinary'] },
+  };
+  const s = state({ blocklist: new Set(['Some Channel']) });
+  assert.deepEqual(decide(tile(), config, s), {
+    hide: true, reason: 'blocked',
+  });
+});
+
+test('title blocking runs before the watched rule', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['ordinary'] },
+  };
+  assert.deepEqual(decide(tile({ hasResumeBar: true }), config, state()), {
+    hide: true, reason: 'title',
+  });
+});
+
+test('a disabled title rule does not hide matching titles', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: false, patterns: ['ordinary'] },
+  };
+  assert.deepEqual(decide(tile(), config, state()), {
+    hide: false, reason: 'shown',
+  });
+});
+
+test('garbage title patterns fail open', () => {
+  const nonArrayConfig = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: 'ordinary' },
+  };
+  assert.deepEqual(decide(tile(), nonArrayConfig, state()), {
+    hide: false, reason: 'shown',
+  });
+
+  const garbageEntriesConfig = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: [42, '', '   '] },
+  };
+  assert.deepEqual(decide(tile(), garbageEntriesConfig, state()), {
+    hide: false, reason: 'shown',
+  });
+});
+
+test('a tile without a title fails open', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['ordinary'] },
+  };
+  assert.deepEqual(decide(tile({ title: null }), config, state()), {
+    hide: false, reason: 'shown',
+  });
 });
 
 test('resume bar marks a video watched', () => {

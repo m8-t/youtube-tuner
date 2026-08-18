@@ -16,6 +16,7 @@ test('every english fixture tile parses completely', () => {
   assert.equal(tiles.length, 6);
   for (const t of tiles) {
     assert.ok(t.videoId, 'videoId');
+    assert.ok(t.title, `title for ${t.videoId}`);
     assert.ok(t.channelName, `channelName for ${t.videoId}`);
     assert.ok(t.ageText, `ageText for ${t.videoId}`);
     assert.ok(t.viewText, `viewText for ${t.videoId}`);
@@ -26,7 +27,10 @@ test('every german fixture tile parses completely', () => {
   const tiles = tilesFrom(loadFixture('sidebar-de.html', 'de'));
   assert.equal(tiles.length, 6);
   for (const t of tiles) {
-    assert.ok(t.videoId && t.channelName && t.ageText && t.viewText, t.videoId);
+    assert.ok(
+      t.videoId && t.title && t.channelName && t.ageText && t.viewText,
+      t.videoId,
+    );
   }
 });
 
@@ -41,6 +45,7 @@ test('reads known values from the english fixture', () => {
 test('reads known values from the german fixture', () => {
   const tiles = tilesFrom(loadFixture('sidebar-de.html', 'de'));
   const tile = tiles.find((t) => t.videoId === '7JV7yHNQjm4');
+  assert.equal(tile.title, 'Ein Tag im ärmsten Dorf Deutschlands');
   assert.equal(tile.channelName, 'Wissenswert');
   assert.equal(tile.ageText, 'vor 10 Monaten');
   assert.equal(tile.viewText, '758.038 Aufrufe');
@@ -54,6 +59,16 @@ test('home fixture wrapped lockup yields exactly one tile', () => {
 test('reads the video ID from the german home fixture', () => {
   const [tile] = tilesFrom(loadFixture('home-de.html', 'de'));
   assert.equal(tile.videoId, 'pHLiSo7f5V0');
+});
+
+test('reads the real title from the german home fixture heading', () => {
+  const doc = loadFixture('home-de.html', 'de');
+  const [tile] = tilesFrom(doc);
+  const fixtureTitle = doc
+    .querySelector('.ytLockupMetadataViewModelHeadingReset')
+    .getAttribute('title');
+  assert.ok(fixtureTitle);
+  assert.equal(tile.title, fixtureTitle);
 });
 
 test('reads the channel name from the german home fixture aria-label', () => {
@@ -151,9 +166,36 @@ test('missing metadata yields nulls, not a throw', () => {
   );
   const tile = readTile(doc.querySelector('yt-lockup-view-model'));
   assert.equal(tile.videoId, 'eeeeeeeeeee');
+  assert.equal(tile.title, null);
   assert.equal(tile.channelName, null);
   assert.equal(tile.ageText, null);
   assert.equal(tile.viewText, null);
+});
+
+test('legacy renderers prefer a title attribute over visible title text', () => {
+  const doc = html(`
+    <ytd-video-renderer>
+      <a href="/watch?v=legacytitle"></a>
+      <a id="video-title" title="  Complete legacy title  ">Short title</a>
+    </ytd-video-renderer>
+  `);
+  assert.equal(
+    readTile(doc.querySelector('ytd-video-renderer')).title,
+    'Complete legacy title',
+  );
+});
+
+test('legacy renderers fall back to trimmed visible title text', () => {
+  const doc = html(`
+    <ytd-video-renderer>
+      <a href="/watch?v=legacytext1"></a>
+      <a id="video-title">  Visible legacy title  </a>
+    </ytd-video-renderer>
+  `);
+  assert.equal(
+    readTile(doc.querySelector('ytd-video-renderer')).title,
+    'Visible legacy title',
+  );
 });
 
 test('garbage input returns null instead of throwing', () => {

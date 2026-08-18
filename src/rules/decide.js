@@ -29,6 +29,18 @@ export function decide(tile, config, state) {
     return hide('blocked');
   }
 
+  if (config.titleRule?.enabled && tile.title) {
+    const title = tile.title.toLowerCase();
+    const patterns = Array.isArray(config.titleRule.patterns)
+      ? config.titleRule.patterns
+      : [];
+    for (const pattern of patterns) {
+      if (typeof pattern !== 'string') continue;
+      const normalized = pattern.trim().toLowerCase();
+      if (normalized && title.includes(normalized)) return hide('title');
+    }
+  }
+
   if (
     config.watchedRule.enabled &&
     override?.watched?.enabled !== false &&

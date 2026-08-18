@@ -46,6 +46,21 @@ export function readTile(element) {
     }
     if (!videoId) return null;
 
+    const titleElement =
+      element.querySelector('.ytLockupMetadataViewModelTitle');
+    const titleHeading = titleElement?.closest(
+      '.ytLockupMetadataViewModelHeadingReset',
+    );
+    const legacyTitleElement = element.querySelector('#video-title');
+    const title = (
+      titleElement?.getAttribute('title')?.trim()
+      || titleHeading?.getAttribute('title')?.trim()
+      || titleElement?.textContent?.trim()
+      || legacyTitleElement?.getAttribute('title')?.trim()
+      || legacyTitleElement?.textContent?.trim()
+      || null
+    );
+
     const locale = element.ownerDocument?.documentElement?.lang
       ?.toLowerCase()
       .startsWith('de')
@@ -105,6 +120,7 @@ export function readTile(element) {
 
     return {
       videoId,
+      title,
       channelName,
       ageText,
       viewText,

@@ -225,6 +225,17 @@
         Hover a video and click the 🚫 button.</p>
     </fieldset>
 
+    <fieldset>
+      <legend>Blocked titles</legend>
+      <label><input type="checkbox" id="title-enabled"> Hide videos whose title contains a blocked phrase</label>
+      <form id="title-filters-form">
+        <textarea id="title-filters" spellcheck="false"></textarea>
+        <p class="status">One phrase per line. Case-insensitive, matches anywhere in the title.</p>
+        <button type="submit">Save</button>
+        <span class="status" id="title-filters-status"></span>
+      </form>
+    </fieldset>
+
     <fieldset id="sync-settings">
       <legend>Sync</legend>
       <table>

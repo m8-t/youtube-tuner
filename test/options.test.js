@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 import {
   exportSettings,
   importSettings,
   MANUAL_REFRESH_TIMEOUT_MS,
+  main,
   renderOverrides,
   renderStatus,
   refreshFailureMessage,
@@ -44,6 +46,68 @@ test('options page includes the channel rules editor', () => {
   assert.match(markup, /<legend>Channel rules<\/legend>/);
   assert.match(markup, /id="override-rows"/);
   assert.match(markup, /id="override-add"/);
+});
+
+test('blocked title options load and save patterns and the enabled checkbox', async (t) => {
+  const mock = installChromeMock({ install: false });
+  await mock.chrome.storage.sync.set({
+    config: {
+      titleRule: {
+        enabled: true,
+        patterns: ['Spoilers', 'Live reaction'],
+      },
+    },
+  });
+  const documentObject = new JSDOM(
+    readFileSync('options.html', 'utf8'),
+  ).window.document;
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  globalThis.chrome = mock.chrome;
+  globalThis.document = documentObject;
+  t.after(() => {
+    globalThis.chrome = previousChrome;
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+  });
+
+  await main();
+
+  const textarea = documentObject.getElementById('title-filters');
+  const checkbox = documentObject.getElementById('title-enabled');
+  assert.equal(textarea.value, 'Spoilers\nLive reaction');
+  assert.equal(checkbox.checked, true);
+
+  textarea.value = '  Spoilers  \n\nRecap\r\nSpoilers\n  Live reaction  ';
+  documentObject.getElementById('title-filters-form').dispatchEvent(
+    new documentObject.defaultView.Event('submit', { bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(mock.areas.sync.config.titleRule.patterns, [
+    'Spoilers',
+    'Recap',
+    'Live reaction',
+  ]);
+  assert.equal(textarea.value, 'Spoilers\nRecap\nLive reaction');
+  assert.equal(
+    documentObject.getElementById('title-filters-status').textContent,
+    'Saved.',
+  );
+
+  checkbox.checked = false;
+  checkbox.dispatchEvent(
+    new documentObject.defaultView.Event('change', { bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mock.areas.sync.config.titleRule.enabled, false);
+  assert.deepEqual(mock.areas.sync.config.titleRule.patterns, [
+    'Spoilers',
+    'Recap',
+    'Live reaction',
+  ]);
 });
 
 async function renderStatusHarness(ageMs = null) {
