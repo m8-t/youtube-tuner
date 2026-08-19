@@ -523,6 +523,7 @@ async function main({
 
   state.locale = detectLocale(document);
   nudge = createStarvationNudge({
+    isNearBottom: (sy, ih, sh) => sh <= ih || sy + ih >= sh - ih * 0.5,
     scrollBy: () => window.scrollBy({
       top: window.innerHeight,
       behavior: 'instant',

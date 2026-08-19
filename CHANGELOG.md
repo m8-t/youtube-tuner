@@ -3,6 +3,16 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.4.6] - 2026-08-19
+
+### Fixed
+
+- The starvation nudge (the automatic scroll that asks YouTube for more
+  content when filters hide most of a feed) no longer fires unless you are
+  already near the bottom of the page. It used to scroll the window from
+  anywhere, which yanked freshly opened watch pages down to the comments and
+  caused rubberbanding while scrolling a heavily filtered home feed.
+
 ## [1.4.5] - 2026-08-18
 
 ### Added

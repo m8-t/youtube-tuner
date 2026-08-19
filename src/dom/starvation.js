@@ -2,6 +2,9 @@ export function createStarvationNudge({
   minVisibleRatio = 0.25,
   maxConsecutive = 5,
   scrollBy,
+  isNearBottom,
+  windowObject = globalThis.window,
+  documentObject = globalThis.document,
 }) {
   let consecutive = 0;
   let lastNudgeTotal = null;
@@ -10,6 +13,17 @@ export function createStarvationNudge({
   return {
     onCounts({ hidden, visible }) {
       const total = hidden + visible;
+      const starved = hidden > 0 &&
+        visible / (visible + hidden) < minVisibleRatio;
+      if (
+        starved &&
+        typeof isNearBottom === 'function' &&
+        !isNearBottom(
+          windowObject?.scrollY,
+          windowObject?.innerHeight,
+          documentObject?.documentElement?.scrollHeight,
+        )
+      ) return;
 
       // Judge the previous nudge by what the next scan found. A growing total
       // means YouTube supplied more tiles, so the nudge was effective even if

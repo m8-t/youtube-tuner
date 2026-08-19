@@ -23,6 +23,60 @@ test('nudges when too few tiles are visible', () => {
   assert.equal(scrolls.length, 1);
 });
 
+test('nudges near the bottom when the visible ratio is starved', () => {
+  const predicateCalls = [];
+  const { nudge, scrolls } = setup({
+    isNearBottom: (...args) => {
+      predicateCalls.push(args);
+      return true;
+    },
+    windowObject: { scrollY: 1_500, innerHeight: 1_000 },
+    documentObject: { documentElement: { scrollHeight: 3_000 } },
+  });
+
+  nudge.onCounts({ hidden: 30, visible: 2 });
+
+  assert.deepEqual(predicateCalls, [[1_500, 1_000, 3_000]]);
+  assert.equal(scrolls.length, 1);
+});
+
+test('does not nudge mid-page when the visible ratio is starved', () => {
+  const { nudge, scrolls } = setup({
+    isNearBottom: () => false,
+  });
+
+  nudge.onCounts({ hidden: 30, visible: 2 });
+
+  assert.equal(scrolls.length, 0);
+});
+
+test('a skipped mid-page nudge does not consume a consecutive attempt', () => {
+  let nearBottom = false;
+  const { nudge, scrolls } = setup({
+    maxConsecutive: 1,
+    isNearBottom: () => nearBottom,
+  });
+
+  nudge.onCounts({ hidden: 30, visible: 2 });
+  nearBottom = true;
+  nudge.onCounts({ hidden: 30, visible: 2 });
+
+  assert.equal(scrolls.length, 1);
+});
+
+test('nudges on a short page when the visible ratio is starved', () => {
+  const { nudge, scrolls } = setup({
+    isNearBottom: (sy, ih, sh) =>
+      sh <= ih || sy + ih >= sh - ih * 0.5,
+    windowObject: { scrollY: 0, innerHeight: 1_000 },
+    documentObject: { documentElement: { scrollHeight: 800 } },
+  });
+
+  nudge.onCounts({ hidden: 30, visible: 2 });
+
+  assert.equal(scrolls.length, 1);
+});
+
 // Regression guard. An absolute "fewer than 8 visible" floor would pass
 // 30 >= 8 and never nudge, which is exactly the deep-feed case this covers.
 test('nudges deep in the feed when the ratio is low but the count is high', () => {
