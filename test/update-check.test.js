@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installChromeMock } from './helpers/chrome-mock.js';
 import {
+  BETA_UPDATE_CHECK_URL,
   UPDATE_CHECK_MIN_INTERVAL_MS,
   UPDATE_CHECK_URL,
   checkForUpdate,
@@ -9,8 +10,15 @@ import {
   updateAvailable,
 } from '../src/update-check.js';
 
-function updateHarness() {
-  const mock = installChromeMock({ install: false });
+function updateHarness({
+  version = '0.7.0',
+  versionName,
+} = {}) {
+  const mock = installChromeMock();
+  mock.chrome.runtime.getManifest = () => ({
+    version,
+    ...(versionName === undefined ? {} : { version_name: versionName }),
+  });
   return {
     mock,
     storage: mock.chrome.storage,
@@ -202,4 +210,166 @@ test('updateAvailable returns only a strictly newer cached tag', async () => {
       expected,
     );
   }
+});
+
+test('stable installs ignore prerelease versions entirely', async () => {
+  const { mock, storage } = updateHarness({ version: '1.4.6' });
+  const calls = [];
+
+  const result = await checkForUpdate({
+    fetchFn: async (...args) => {
+      calls.push(args);
+      return {
+        ok: true,
+        async json() {
+          return { tag_name: 'v1.4.7-beta.3', prerelease: true };
+        },
+      };
+    },
+    storage,
+    now: 1_000,
+    currentVersion: '1.4.6',
+  });
+
+  assert.equal(result, null);
+  assert.deepEqual(calls, [[
+    UPDATE_CHECK_URL,
+    { headers: { Accept: 'application/vnd.github+json' } },
+  ]]);
+  assert.deepEqual(mock.areas.local.updateCheck, { lastCheckedAt: 1_000 });
+});
+
+test('beta installs are nudged to the same-base stable release', async () => {
+  const { mock, storage } = updateHarness({
+    version: '1.4.6.2',
+    versionName: '1.4.7-beta.2',
+  });
+  const calls = [];
+
+  const result = await checkForUpdate({
+    fetchFn: async (...args) => {
+      calls.push(args);
+      return {
+        ok: true,
+        async json() {
+          return [{ tag_name: 'v1.4.7', draft: false }];
+        },
+      };
+    },
+    storage,
+    now: 2_000,
+    currentVersion: '1.4.6.2',
+  });
+
+  assert.equal(result, 'v1.4.7');
+  assert.deepEqual(calls, [[
+    BETA_UPDATE_CHECK_URL,
+    { headers: { Accept: 'application/vnd.github+json' } },
+  ]]);
+  assert.deepEqual(mock.areas.local.updateCheck, {
+    lastCheckedAt: 2_000,
+    latestTag: 'v1.4.7',
+  });
+  assert.equal(
+    await updateAvailable({ storage, currentVersion: '1.4.6.2' }),
+    'v1.4.7',
+  );
+});
+
+test('beta installs are nudged to a newer beta release', async () => {
+  const { storage } = updateHarness({
+    version: '1.4.6.1',
+    versionName: '1.4.7-beta.1',
+  });
+
+  await checkForUpdate({
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return [
+          { tag_name: 'v1.4.7-beta.2', draft: false },
+          { tag_name: 'v1.4.7-beta.3', draft: false },
+        ];
+      },
+    }),
+    storage,
+    now: 3_000,
+    currentVersion: '1.4.6.1',
+  });
+
+  assert.equal(
+    await updateAvailable({ storage, currentVersion: '1.4.6.1' }),
+    'v1.4.7-beta.3',
+  );
+});
+
+test('beta installs are not nudged by older stable or equal tags', async () => {
+  for (const tag of ['v1.4.6', 'v1.4.7-beta.2']) {
+    const { storage } = updateHarness({
+      version: '1.4.6.2',
+      versionName: '1.4.7-beta.2',
+    });
+    await storage.local.set({
+      updateCheck: { lastCheckedAt: 4_000, latestTag: tag },
+    });
+
+    assert.equal(
+      await updateAvailable({ storage, currentVersion: '1.4.6.2' }),
+      null,
+    );
+  }
+});
+
+test('beta installs ignore unparseable tags without a nudge', async () => {
+  const { mock, storage } = updateHarness({
+    version: '1.4.6.2',
+    versionName: '1.4.7-beta.2',
+  });
+
+  const result = await checkForUpdate({
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return [{ tag_name: 'nightly', draft: false }];
+      },
+    }),
+    storage,
+    now: 5_000,
+    currentVersion: '1.4.6.2',
+  });
+
+  assert.equal(result, null);
+  assert.deepEqual(mock.areas.local.updateCheck, { lastCheckedAt: 5_000 });
+  assert.equal(
+    await updateAvailable({ storage, currentVersion: '1.4.6.2' }),
+    null,
+  );
+});
+
+test('beta installs filter and ignore draft releases', async () => {
+  const { storage } = updateHarness({
+    version: '1.4.6.2',
+    versionName: '1.4.7-beta.2',
+  });
+
+  const result = await checkForUpdate({
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return [
+          { tag_name: 'v1.5.0', draft: true },
+          { tag_name: 'v1.4.7-beta.2', draft: false },
+        ];
+      },
+    }),
+    storage,
+    now: 6_000,
+    currentVersion: '1.4.6.2',
+  });
+
+  assert.equal(result, 'v1.4.7-beta.2');
+  assert.equal(
+    await updateAvailable({ storage, currentVersion: '1.4.6.2' }),
+    null,
+  );
 });
