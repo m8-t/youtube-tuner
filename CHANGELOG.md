@@ -3,6 +3,21 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.4.7] - 2026-08-19
+
+### Added
+
+- Beta installs now check for updates across prereleases: a beta gets
+  nudged when a newer beta or the stable release that supersedes its
+  series appears. Stable installs are unchanged and never see betas.
+
+### Changed
+
+- New beta version scheme: beta builds carry the previous stable version
+  plus a build number in the manifest (for example 1.4.6.2 for
+  1.4.7-beta.2), so updating from a beta to the following stable release
+  is no longer rejected as a downgrade.
+
 ## [1.4.6] - 2026-08-19
 
 ### Fixed
