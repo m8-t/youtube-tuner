@@ -38,11 +38,68 @@ jobs:
           EXPECTED_VERSION=$TAG_VERSION
           case "$TAG_VERSION" in
             *-beta.*)
-              EXPECTED_VERSION=$(printf '%s' "$TAG_VERSION" | sed 's/-beta\././')
               if [ "$VERSION_NAME" != "$TAG_VERSION" ]; then
                 echo "Manifest version_name does not match beta release tag." >&2
                 exit 1
               fi
+              # Betas use the previous stable version so Chrome will not treat
+              # the same-base stable release as a downgrade.
+              MANIFEST_MAJOR=${VERSION%%.*}
+              MANIFEST_REMAINDER=${VERSION#*.}
+              MANIFEST_MINOR=${MANIFEST_REMAINDER%%.*}
+              MANIFEST_REMAINDER=${MANIFEST_REMAINDER#*.}
+              MANIFEST_PATCH=${MANIFEST_REMAINDER%%.*}
+              MANIFEST_BETA=${MANIFEST_REMAINDER#*.}
+              if [ "$MANIFEST_REMAINDER" = "$MANIFEST_BETA" ] ||
+                [ "${MANIFEST_BETA#*.}" != "$MANIFEST_BETA" ]; then
+                echo "Beta manifest version must have four numeric components." >&2
+                exit 1
+              fi
+              for COMPONENT in "$MANIFEST_MAJOR" "$MANIFEST_MINOR" \
+                "$MANIFEST_PATCH" "$MANIFEST_BETA"; do
+                case "$COMPONENT" in
+                  ''|*[!0-9]*)
+                    echo "Beta manifest version must have four numeric components." >&2
+                    exit 1
+                    ;;
+                esac
+              done
+
+              TAG_BASE=${TAG_VERSION%-beta.*}
+              TAG_BETA=${TAG_VERSION##*-beta.}
+              TAG_MAJOR=${TAG_BASE%%.*}
+              TAG_REMAINDER=${TAG_BASE#*.}
+              TAG_MINOR=${TAG_REMAINDER%%.*}
+              TAG_PATCH=${TAG_REMAINDER#*.}
+              if [ "$TAG_REMAINDER" = "$TAG_PATCH" ] ||
+                [ "${TAG_PATCH#*.}" != "$TAG_PATCH" ]; then
+                echo "Beta release tag has an invalid version." >&2
+                exit 1
+              fi
+              for COMPONENT in "$TAG_MAJOR" "$TAG_MINOR" "$TAG_PATCH" \
+                "$TAG_BETA"; do
+                case "$COMPONENT" in
+                  ''|*[!0-9]*)
+                    echo "Beta release tag has an invalid version." >&2
+                    exit 1
+                    ;;
+                esac
+              done
+
+              if [ "$MANIFEST_BETA" -ne "$TAG_BETA" ]; then
+                echo "Manifest beta component does not match release tag." >&2
+                exit 1
+              fi
+              if [ "$MANIFEST_MAJOR" -lt "$TAG_MAJOR" ] ||
+                { [ "$MANIFEST_MAJOR" -eq "$TAG_MAJOR" ] &&
+                  [ "$MANIFEST_MINOR" -lt "$TAG_MINOR" ]; } ||
+                { [ "$MANIFEST_MAJOR" -eq "$TAG_MAJOR" ] &&
+                  [ "$MANIFEST_MINOR" -eq "$TAG_MINOR" ] &&
+                  [ "$MANIFEST_PATCH" -lt "$TAG_PATCH" ]; }; then
+                exit 0
+              fi
+              echo "Beta manifest base must be lower than release tag." >&2
+              exit 1
               ;;
           esac
           if [ "$VERSION" != "$EXPECTED_VERSION" ]; then
