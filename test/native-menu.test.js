@@ -18,6 +18,15 @@ const MENU_LABELS = [
   'Melden',
 ];
 
+const SUBSCRIPTIONS_MENU_LABELS = [
+  'In die Wiedergabeliste',
+  "Zu 'Später ansehen' hinzufügen",
+  'Zu Playlist hinzufügen',
+  'Herunterladen',
+  'Teilen',
+  'Ausblenden',
+];
+
 function tileMarkup() {
   return `
     <yt-lockup-view-model id="tile">
@@ -171,6 +180,38 @@ test('native menu clicks exact watch-later match on row 2', async () => {
 
   assert.equal(acted, true);
   assert.deepEqual(getClicked(), [2]);
+});
+
+test('native menu hide action clicks exact "Ausblenden" match on row 6', async () => {
+  const { doc, tile, getClicked } = setupPopupOnTrigger(
+    SUBSCRIPTIONS_MENU_LABELS,
+  );
+
+  const acted = await runNativeMenuAction({
+    tile,
+    action: 'hide',
+    doc,
+    isVisible: () => true,
+  });
+
+  assert.equal(acted, true);
+  assert.deepEqual(getClicked(), [6]);
+  assert.deepEqual(MENU_STRINGS.hide, ['Ausblenden', 'Hide']);
+});
+
+test('native menu returns false when the hide menu item is missing', async () => {
+  const labels = SUBSCRIPTIONS_MENU_LABELS.slice(0, -1);
+  const { doc, tile, getClicked } = setupPopupOnTrigger(labels);
+
+  const acted = await runNativeMenuAction({
+    tile,
+    action: 'hide',
+    doc,
+    isVisible: () => true,
+  });
+
+  assert.equal(acted, false);
+  assert.deepEqual(getClicked(), []);
 });
 
 test('native menu still clicks a legacy host-role menu item', async () => {

@@ -36,6 +36,7 @@ const lifecycleTile = `
 function setupFilteringLifecycle({
   pathname = '/',
   enabled = true,
+  subs = new Set(),
   subsStale = false,
   markup = lifecycleTile,
   nativeUndoWatcher,
@@ -44,7 +45,7 @@ function setupFilteringLifecycle({
   let currentPathname = pathname;
   let currentConfig = { ...DEFAULT_CONFIG, enabled };
   const currentState = {
-    subs: new Set(),
+    subs,
     subsStale,
     blocklist: new Set(['Blocked Channel']),
     watched: new Set(),
@@ -278,6 +279,44 @@ test('repeated navigation events on one route do not duplicate artifacts', (t) =
     doc.querySelectorAll(`.${NOT_INTERESTED_BUTTON_CLASS}`).length,
     1,
   );
+});
+
+test('subscriptions feed suppresses block buttons with a cold cache', (t) => {
+  const { doc, lifecycle, setPathname } = setupFilteringLifecycle({
+    pathname: '/feed/subscriptions',
+    subs: null,
+  });
+  t.after(() => lifecycle.stop());
+
+  lifecycle.sync();
+
+  assert.equal(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`), null);
+
+  setPathname('/');
+  lifecycle.sync();
+
+  assert.ok(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`));
+});
+
+test('thumbs-down action follows the current surface across SPA navigation', (t) => {
+  const { doc, lifecycle, setPathname } = setupFilteringLifecycle({
+    pathname: '/feed/subscriptions',
+  });
+  t.after(() => lifecycle.stop());
+  lifecycle.sync();
+  const button = doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`);
+  assert.equal(button.dataset.action, 'hide');
+  assert.equal(button.title, 'Hide from subscriptions feed');
+
+  setPathname('/');
+  lifecycle.sync();
+
+  assert.equal(
+    doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`),
+    button,
+  );
+  assert.equal(button.dataset.action, 'notInterested');
+  assert.equal(button.title, 'Not interested in this video');
 });
 
 test('disabling on a supported route leaves a completely clean page', (t) => {

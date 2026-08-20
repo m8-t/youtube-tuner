@@ -1,5 +1,10 @@
 export const MENU_STRINGS = {
   notInterested: ['Kein Interesse', 'Not interested'],
+  hide: [
+    'Ausblenden',
+    // English label unverified against a live capture.
+    'Hide',
+  ],
   dontRecommendChannel: [
     'Keine Videos von diesem Kanal empfehlen',
     "Don't recommend channel",

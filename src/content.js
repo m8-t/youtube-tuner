@@ -324,10 +324,15 @@ export function createFilteringLifecycle({
       readTile,
       doc: documentObject,
       offerWatchLater: getPathname() === '/watch',
-      shouldOffer: (channelName) => {
-        const { subs } = getState();
-        return subs === null || !subs.has(channelName.trim());
-      },
+      dismissAction: getPathname() === '/feed/subscriptions'
+        ? 'hide'
+        : 'notInterested',
+      shouldOffer: getPathname() === '/feed/subscriptions'
+        ? () => false
+        : (channelName) => {
+          const { subs } = getState();
+          return subs === null || !subs.has(channelName.trim());
+        },
       onBlock: async (channelName) => {
         await addBlockedChannel(channelName);
         getState().blocklist.add(channelName);

@@ -58,6 +58,7 @@ export function attachBlockButtons({
   doc,
   shouldOffer = () => true,
   offerWatchLater = false,
+  dismissAction = 'notInterested',
   onNativeAction = runNativeMenuAction,
   registry = nativeUndoRegistry,
 }) {
@@ -101,14 +102,13 @@ export function attachBlockButtons({
       notInterestedButton.className = NOT_INTERESTED_BUTTON_CLASS;
       notInterestedButton.type = 'button';
       notInterestedButton.textContent = '\u{1F44E}';
-      notInterestedButton.title = 'Not interested in this video';
       notInterestedButton.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
         try {
           Promise.resolve(onNativeAction({
             tile: element,
-            action: 'notInterested',
+            action: notInterestedButton.dataset.action,
             doc,
           })).catch(() => {});
         } catch {
@@ -182,6 +182,10 @@ export function attachBlockButtons({
 
     // YouTube may have recycled this tile for a different channel.
     notInterestedButton.dataset.videoId = tile.videoId;
+    notInterestedButton.dataset.action = dismissAction;
+    notInterestedButton.title = dismissAction === 'hide'
+      ? 'Hide from subscriptions feed'
+      : 'Not interested in this video';
     if (watchLaterButton) {
       watchLaterButton.dataset.videoId = tile.videoId;
     }

@@ -13,11 +13,15 @@ import {
 } from '../src/dom/block-button.js';
 import { readTile, TILE_SELECTOR } from '../src/dom/tile-adapter.js';
 
-function setup(markup, shouldOffer) {
+function setup(markup, defaultShouldOffer) {
   const doc = html(markup);
   const blocked = [];
   const nativeActions = [];
-  const run = ({ offerWatchLater = false } = {}) => {
+  const run = ({
+    offerWatchLater = false,
+    dismissAction = 'notInterested',
+    shouldOffer = defaultShouldOffer,
+  } = {}) => {
     const options = {
       root: doc.body,
       tileSelector: TILE_SELECTOR,
@@ -25,6 +29,7 @@ function setup(markup, shouldOffer) {
       onBlock: (name) => blocked.push(name),
       onNativeAction: (request) => nativeActions.push(request.action),
       offerWatchLater,
+      dismissAction,
       doc,
     };
     if (shouldOffer !== undefined) options.shouldOffer = shouldOffer;
@@ -203,6 +208,16 @@ test('does not add a button when shouldOffer returns false', () => {
   assert.ok(doc.querySelector('#a').classList.contains(NO_BLOCK_CLASS));
 });
 
+test('RECYCLING: removes an existing button when shouldOffer becomes false', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run();
+  assert.ok(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`));
+
+  run({ shouldOffer: () => false });
+
+  assert.equal(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`), null);
+});
+
 test('subscribed tiles show not-interested but suppress block-channel', () => {
   const { doc, blocked, nativeActions, run } = setup(
     tile('a', 'video1', 'Subscribed Channel'),
@@ -217,6 +232,36 @@ test('subscribed tiles show not-interested but suppress block-channel', () => {
   notInterested.click();
   assert.deepEqual(nativeActions, ['notInterested']);
   assert.deepEqual(blocked, []);
+});
+
+test('thumbs-down dispatches the configured native action', () => {
+  const { doc, nativeActions, run } =
+    setup(tile('a', 'video1', 'Some Channel'));
+  run({ dismissAction: 'hide' });
+
+  doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`).click();
+
+  assert.deepEqual(nativeActions, ['hide']);
+});
+
+test('RECYCLING: thumbs-down reads its re-stamped action at click time', () => {
+  const { doc, nativeActions, run } =
+    setup(tile('a', 'video1', 'Some Channel'));
+  run({ dismissAction: 'notInterested' });
+  const button = doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`);
+  assert.equal(button.dataset.action, 'notInterested');
+  assert.equal(button.title, 'Not interested in this video');
+
+  run({ dismissAction: 'hide' });
+
+  assert.equal(
+    doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`),
+    button,
+  );
+  assert.equal(button.dataset.action, 'hide');
+  assert.equal(button.title, 'Hide from subscriptions feed');
+  button.click();
+  assert.deepEqual(nativeActions, ['hide']);
 });
 
 test('adds a button when shouldOffer returns true', () => {

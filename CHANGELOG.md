@@ -3,6 +3,19 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- The thumbs-down button did nothing on the subscriptions page. That feed's
+  3-dot menu has no "Not interested" entry, so every click quietly fell
+  through. It now fires YouTube's own "Hide" action there, which drops the
+  video from the subscriptions feed. Home feed and watch page are unchanged.
+- The block button no longer appears on the subscriptions page. Everything in
+  that feed comes from a channel you are subscribed to, and subscribed
+  channels get no block button anywhere else either; it only turned up there
+  when the cached subscription list was empty or out of date.
+
 ## [1.4.7] - 2026-08-19
 
 ### Added
