@@ -167,12 +167,34 @@ test('missing metadata yields nulls, not a throw', () => {
   const tile = readTile(doc.querySelector('yt-lockup-view-model'));
   assert.equal(tile.videoId, 'eeeeeeeeeee');
   assert.equal(tile.title, null);
+  assert.deepEqual(tile.titles, []);
   assert.equal(tile.channelName, null);
   assert.equal(tile.ageText, null);
   assert.equal(tile.viewText, null);
 });
 
-test('legacy renderers prefer a title attribute over visible title text', () => {
+test('visible title wins while every distinct title candidate is retained', () => {
+  const visibleTitle =
+    'American Reacts to Brazil 1-7 Germany | World Cup Shock';
+  const attributeTitle =
+    "American Watches Football's Most Humiliating Night";
+  const doc = html(`
+    <yt-lockup-view-model>
+      <a href="/watch?v=splitttitle"></a>
+      <h3 class="ytLockupMetadataViewModelHeadingReset"
+          title="${attributeTitle}">
+        <a class="ytLockupMetadataViewModelTitle"
+           title="  ${visibleTitle}  ">${visibleTitle}</a>
+      </h3>
+    </yt-lockup-view-model>
+  `);
+
+  const tile = readTile(doc.querySelector('yt-lockup-view-model'));
+  assert.equal(tile.title, visibleTitle);
+  assert.deepEqual(tile.titles, [visibleTitle, attributeTitle]);
+});
+
+test('legacy renderers prefer visible title text over a title attribute', () => {
   const doc = html(`
     <ytd-video-renderer>
       <a href="/watch?v=legacytitle"></a>
@@ -181,7 +203,7 @@ test('legacy renderers prefer a title attribute over visible title text', () => 
   `);
   assert.equal(
     readTile(doc.querySelector('ytd-video-renderer')).title,
-    'Complete legacy title',
+    'Short title',
   );
 });
 
@@ -196,6 +218,27 @@ test('legacy renderers fall back to trimmed visible title text', () => {
     readTile(doc.querySelector('ytd-video-renderer')).title,
     'Visible legacy title',
   );
+});
+
+test('attribute-only and text-only tiles each expose a one-element title array', () => {
+  const doc = html(`
+    <yt-lockup-view-model id="attribute-only">
+      <a href="/watch?v=attronly001"></a>
+      <a class="ytLockupMetadataViewModelTitle" title="  Attribute title  "></a>
+    </yt-lockup-view-model>
+    <yt-lockup-view-model id="text-only">
+      <a href="/watch?v=textonly001"></a>
+      <a class="ytLockupMetadataViewModelTitle">  Visible title  </a>
+    </yt-lockup-view-model>
+  `);
+
+  const attributeTile = readTile(doc.getElementById('attribute-only'));
+  assert.equal(attributeTile.title, 'Attribute title');
+  assert.deepEqual(attributeTile.titles, ['Attribute title']);
+
+  const textTile = readTile(doc.getElementById('text-only'));
+  assert.equal(textTile.title, 'Visible title');
+  assert.deepEqual(textTile.titles, ['Visible title']);
 });
 
 test('garbage input returns null instead of throwing', () => {

@@ -52,14 +52,16 @@ export function readTile(element) {
       '.ytLockupMetadataViewModelHeadingReset',
     );
     const legacyTitleElement = element.querySelector('#video-title');
-    const title = (
-      titleElement?.getAttribute('title')?.trim()
-      || titleHeading?.getAttribute('title')?.trim()
-      || titleElement?.textContent?.trim()
-      || legacyTitleElement?.getAttribute('title')?.trim()
-      || legacyTitleElement?.textContent?.trim()
-      || null
-    );
+    // A 2026-08-21 de-DE capture showed YoutubeAntiTranslate changing visible
+    // text but not the heading title attribute, so the two titles can disagree.
+    const titles = [...new Set([
+      titleElement?.textContent,
+      legacyTitleElement?.textContent,
+      titleElement?.getAttribute('title'),
+      titleHeading?.getAttribute('title'),
+      legacyTitleElement?.getAttribute('title'),
+    ].map((candidate) => candidate?.trim()).filter(Boolean))];
+    const title = titles[0] ?? null;
 
     const locale = element.ownerDocument?.documentElement?.lang
       ?.toLowerCase()
@@ -121,6 +123,7 @@ export function readTile(element) {
     return {
       videoId,
       title,
+      titles,
       channelName,
       ageText,
       viewText,

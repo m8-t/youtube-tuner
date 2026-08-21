@@ -3,6 +3,21 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- Blocked title phrases missed videos whose on-screen title differed from the
+  title attribute YouTube leaves in the markup. The rule read the attribute and
+  ignored what you actually see, so a phrase copied off the page never matched.
+  It now reads the visible title first and tests your phrases against every
+  title variant a tile carries, which also covers titles rewritten by other
+  extensions.
+- The options page wrote a settings snapshot taken when it was opened. Adding a
+  blocked phrase from the popup and then changing any option on an
+  already-open options page silently discarded the new phrase. Both save paths
+  now merge into the current stored settings.
+
 ## [1.4.8] - 2026-08-20
 
 ### Fixed

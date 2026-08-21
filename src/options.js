@@ -98,6 +98,7 @@ function render() {
 }
 
 async function persist() {
+  config = await loadConfig();
   for (const [id, prop, , set] of FIELDS) {
     const value = el(id)[prop];
     if (prop === 'valueAsNumber' && !Number.isFinite(value)) continue;
@@ -960,6 +961,7 @@ export async function main() {
       .split(/\r?\n/)
       .map((pattern) => pattern.trim())
       .filter(Boolean);
+    config = await loadConfig();
     config.titleRule.patterns = [...new Set(patterns)];
     await saveConfig(config);
     renderTitleFilters();

@@ -30,14 +30,22 @@ export function decide(tile, config, state) {
   }
 
   if (config.titleRule?.enabled && tile.title) {
-    const title = tile.title.toLowerCase();
+    const titles = Array.isArray(tile.titles) && tile.titles.length > 0
+      ? tile.titles
+      : [tile.title];
     const patterns = Array.isArray(config.titleRule.patterns)
       ? config.titleRule.patterns
       : [];
     for (const pattern of patterns) {
       if (typeof pattern !== 'string') continue;
       const normalized = pattern.trim().toLowerCase();
-      if (normalized && title.includes(normalized)) return hide('title');
+      if (
+        normalized &&
+        titles.some((title) =>
+          typeof title === 'string' && title.toLowerCase().includes(normalized))
+      ) {
+        return hide('title');
+      }
     }
   }
 

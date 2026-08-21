@@ -110,6 +110,73 @@ test('blocked title options load and save patterns and the enabled checkbox', as
   ]);
 });
 
+test('options saves page edits on top of the latest stored config', async (t) => {
+  const mock = installChromeMock({ install: false });
+  await mock.chrome.storage.sync.set({
+    config: {
+      titleRule: { enabled: true, patterns: ['Initial phrase'] },
+    },
+  });
+  const documentObject = new JSDOM(
+    readFileSync('options.html', 'utf8'),
+  ).window.document;
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  globalThis.chrome = mock.chrome;
+  globalThis.document = documentObject;
+  t.after(() => {
+    globalThis.chrome = previousChrome;
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+  });
+
+  await main();
+
+  await mock.chrome.storage.sync.set({
+    config: {
+      ...mock.areas.sync.config,
+      titleRule: { enabled: true, patterns: ['Added from popup'] },
+    },
+  });
+  const ageDays = documentObject.getElementById('age-days');
+  ageDays.value = '365';
+  ageDays.dispatchEvent(
+    new documentObject.defaultView.Event('change', { bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(mock.areas.sync.config.ageRule.maxAgeDays, 365);
+  assert.deepEqual(
+    mock.areas.sync.config.titleRule.patterns,
+    ['Added from popup'],
+  );
+
+  await mock.chrome.storage.sync.set({
+    config: {
+      ...mock.areas.sync.config,
+      viewRule: {
+        ...mock.areas.sync.config.viewRule,
+        minViews: 9876,
+      },
+    },
+  });
+  const textarea = documentObject.getElementById('title-filters');
+  textarea.value = 'Saved from options';
+  documentObject.getElementById('title-filters-form').dispatchEvent(
+    new documentObject.defaultView.Event('submit', { bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(
+    mock.areas.sync.config.titleRule.patterns,
+    ['Saved from options'],
+  );
+  assert.equal(mock.areas.sync.config.viewRule.minViews, 9876);
+});
+
 async function renderStatusHarness(ageMs = null) {
   const mock = installChromeMock({ install: false });
   if (ageMs !== null) {

@@ -69,6 +69,34 @@ test('a blocked phrase matches in the middle of a title', () => {
   });
 });
 
+test('title blocking checks both visible and attribute title variants', () => {
+  const attributeTitle =
+    "American Watches Football's Most Humiliating Night";
+  const visibleTitle =
+    'American Reacts to Brazil 1-7 Germany | World Cup Shock';
+  const capturedTile = tile({
+    title: visibleTitle,
+    titles: [visibleTitle, attributeTitle],
+  });
+  const withPattern = (pattern) => ({
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: [pattern] },
+  });
+
+  assert.deepEqual(
+    decide(capturedTile, withPattern('Most Humiliating Night'), state()),
+    { hide: true, reason: 'title' },
+  );
+  assert.deepEqual(
+    decide(capturedTile, withPattern('Brazil 1-7 Germany'), state()),
+    { hide: true, reason: 'title' },
+  );
+  assert.deepEqual(
+    decide(capturedTile, withPattern('Argentina wins'), state()),
+    { hide: false, reason: 'shown' },
+  );
+});
+
 test('title blocking applies to subscribed channels', () => {
   const config = {
     ...DEFAULT_CONFIG,
