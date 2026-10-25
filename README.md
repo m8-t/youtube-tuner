@@ -176,11 +176,12 @@ The first applicable rule gives the result.
 | 3 | The video has a resume bar or is in the watched set. | Hide the video. |
 | 4 | No subscription set is available. | Show the video. |
 | 5 | The channel is in the subscription set. | Show the video. |
-| 6 | The video is older than the age limit. | Hide the video. |
-| 7 | The video has too few views after the grace period. | Hide the video. |
-| 8 | No rule above applies. | Show the video. |
+| 6 | The video is younger than the minimum age (off by default). | Hide the video. |
+| 7 | The video is older than the age limit. | Hide the video. |
+| 8 | The video has too few views after the grace period. | Hide the video. |
+| 9 | No rule above applies. | Show the video. |
 
-The default limits are 1095 days, 5000 views, and a 48-hour grace period.
+The default limits are 1095 days, 5000 views, and a 48-hour grace period. The minimum age is 0 hours (off). A minimum age above the grace period makes the grace period have no effect.
 
 ### Channel rules
 

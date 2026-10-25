@@ -83,6 +83,7 @@ const FIELDS = [
   ['enabled', 'checked', (c) => c.enabled, (c, v) => { c.enabled = v; }],
   ['age-enabled', 'checked', (c) => c.ageRule.enabled, (c, v) => { c.ageRule.enabled = v; }],
   ['age-days', 'valueAsNumber', (c) => c.ageRule.maxAgeDays, (c, v) => { c.ageRule.maxAgeDays = v; }],
+  ['age-min-hours', 'valueAsNumber', (c) => c.ageRule.minAgeHours, (c, v) => { c.ageRule.minAgeHours = v; }],
   ['view-enabled', 'checked', (c) => c.viewRule.enabled, (c, v) => { c.viewRule.enabled = v; }],
   ['view-min', 'valueAsNumber', (c) => c.viewRule.minViews, (c, v) => { c.viewRule.minViews = v; }],
   ['view-grace', 'valueAsNumber', (c) => c.viewRule.graceHours, (c, v) => { c.viewRule.graceHours = v; }],

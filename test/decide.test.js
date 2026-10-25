@@ -212,6 +212,55 @@ test('video older than the cutoff is hidden', () => {
   assert.deepEqual(decide(t, DEFAULT_CONFIG, state()), { hide: true, reason: 'age' });
 });
 
+const minAge = (hours) => ({
+  ...DEFAULT_CONFIG,
+  ageRule: { ...DEFAULT_CONFIG.ageRule, minAgeHours: hours },
+});
+
+test('a video younger than minAgeHours is hidden as too-new', () => {
+  const t = tile({ ageText: '1 hour ago' });
+  assert.deepEqual(decide(t, minAge(24), state()), { hide: true, reason: 'too-new' });
+});
+
+test('german too-new age text is hidden', () => {
+  const t = tile({ ageText: 'vor 3 Stunden', viewText: '50.000 Aufrufe' });
+  assert.deepEqual(decide(t, minAge(24), state({ locale: 'de' })), {
+    hide: true, reason: 'too-new',
+  });
+});
+
+test('a video exactly minAgeHours old is shown', () => {
+  const t = tile({ ageText: '24 hours ago' });
+  assert.deepEqual(decide(t, minAge(24), state()), { hide: false, reason: 'shown' });
+});
+
+test('minAgeHours 0 leaves the grace period in charge', () => {
+  const t = tile({ ageText: '1 hour ago', viewText: '1 view' });
+  assert.deepEqual(decide(t, minAge(0), state()), { hide: false, reason: 'shown' });
+});
+
+test('a subscribed channel is exempt from minAgeHours', () => {
+  const t = tile({ ageText: '1 hour ago' });
+  const s = state({ subs: new Set(['Some Channel']) });
+  assert.deepEqual(decide(t, minAge(24), s), { hide: false, reason: 'subscribed' });
+});
+
+test('unparseable age text is shown with minAgeHours set', () => {
+  const t = tile({ ageText: 'Streamed live' });
+  assert.deepEqual(decide(t, minAge(24), state()), { hide: false, reason: 'shown' });
+});
+
+test('max age still hides old videos when minAgeHours is set', () => {
+  const t = tile({ ageText: '4 years ago' });
+  assert.deepEqual(decide(t, minAge(24), state()), { hide: true, reason: 'age' });
+});
+
+test('config without minAgeHours behaves as off', () => {
+  const config = { ...DEFAULT_CONFIG, ageRule: { enabled: true, maxAgeDays: 1095 } };
+  const t = tile({ ageText: '1 hour ago' });
+  assert.deepEqual(decide(t, config, state()), { hide: false, reason: 'shown' });
+});
+
 test('video just under the cutoff is shown', () => {
   const t = tile({ ageText: '2 years ago' });
   assert.deepEqual(decide(t, DEFAULT_CONFIG, state()), { hide: false, reason: 'shown' });

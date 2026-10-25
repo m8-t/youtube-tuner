@@ -177,6 +177,45 @@ test('options saves page edits on top of the latest stored config', async (t) =>
   assert.equal(mock.areas.sync.config.viewRule.minViews, 9876);
 });
 
+test('options round-trips the minimum age field', async (t) => {
+  const mock = installChromeMock({ install: false });
+  await mock.chrome.storage.sync.set({
+    config: { ageRule: { enabled: true, maxAgeDays: 1095, minAgeHours: 12 } },
+  });
+  const documentObject = new JSDOM(
+    readFileSync('options.html', 'utf8'),
+  ).window.document;
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  globalThis.chrome = mock.chrome;
+  globalThis.document = documentObject;
+  t.after(() => {
+    globalThis.chrome = previousChrome;
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+  });
+
+  await main();
+
+  const input = documentObject.getElementById('age-min-hours');
+  assert.equal(input.valueAsNumber, 12);
+  const change = () => input.dispatchEvent(
+    new documentObject.defaultView.Event('change', { bubbles: true }),
+  );
+  input.value = '36';
+  change();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mock.areas.sync.config.ageRule.minAgeHours, 36);
+
+  input.value = '';
+  change();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mock.areas.sync.config.ageRule.minAgeHours, 36);
+});
+
 async function renderStatusHarness(ageMs = null) {
   const mock = installChromeMock({ install: false });
   if (ageMs !== null) {

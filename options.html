@@ -169,7 +169,10 @@
       <legend>Age</legend>
       <label><input type="checkbox" id="age-enabled"> Hide videos older than
         <input type="number" id="age-days" min="1" step="1"> days</label>
-      <p class="status">Subscribed channels are exempt. 1095 days = 3 years.</p>
+      <label>Hide videos younger than
+        <input type="number" id="age-min-hours" min="0" step="1"> hours</label>
+      <p class="status">Subscribed channels are exempt. 1095 days = 3 years.
+        0 = off. Above the views grace period, the grace period has no effect.</p>
     </fieldset>
 
     <fieldset>

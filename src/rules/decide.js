@@ -74,7 +74,12 @@ export function decide(tile, config, state) {
   const maxAgeDays =
     override?.age?.maxAgeDays ?? config.ageRule.maxAgeDays;
 
+  const minAgeHours = config.ageRule.minAgeHours ?? 0;
+
   if (ageEnabled && ageMs !== null) {
+    if (minAgeHours > 0 && ageMs < minAgeHours * HOUR_MS) {
+      return hide('too-new');
+    }
     if (ageMs > maxAgeDays * DAY_MS) {
       return hide(override?.age ? 'age-override' : 'age');
     }

@@ -40,6 +40,15 @@ test('config merges stored values over defaults', async () => {
   assert.equal(config.viewRule.minViews, 5000);
 });
 
+test('a stored config without minAgeHours loads it as 0', async () => {
+  await chrome.storage.sync.set({
+    config: { ageRule: { enabled: true, maxAgeDays: 500 } },
+  });
+  const config = await loadConfig();
+  assert.equal(config.ageRule.minAgeHours, 0);
+  assert.equal(config.ageRule.maxAgeDays, 500);
+});
+
 test('a partial stored config still gets every default key', async () => {
   await chrome.storage.sync.set({ config: { enabled: false } });
   const config = await loadConfig();
