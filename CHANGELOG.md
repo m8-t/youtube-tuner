@@ -3,6 +3,17 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.5.0] - 2026-10-25
+
+### Added
+
+- Minimum age for recommendations. Under Age in the options, "Hide videos
+  younger than N hours" hides fresh uploads, such as an hour-old video with a
+  handful of views that the views grace period used to let through. It is off
+  by default (0), uses the same Age switch as the maximum age, and leaves
+  subscribed channels and live or premiere tiles alone. With a minimum age
+  above the views grace period, the grace period has no effect.
+
 ## [1.4.9] - 2026-08-21
 
 ### Fixed
