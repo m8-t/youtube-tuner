@@ -48,15 +48,18 @@ export function injectStyles(doc) {
       outline: 2px solid #fff; outline-offset: 2px;
     }
     .${BLOCK_TOAST_CLASS} {
-      position: fixed; left: 16px; bottom: 80px; z-index: 2147483647;
-      display: flex; align-items: center; gap: 12px;
-      background: rgba(0,0,0,.85); color: #fff; border-radius: 6px;
-      font: 14px/1.2 sans-serif; padding: 10px 14px;
+      position: fixed; left: 24px; bottom: 24px; z-index: 2147483647;
+      display: flex; align-items: center; gap: 24px;
+      background: #0f0f0f; color: #fff; border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.5);
+      font: 500 18px/1.3 Roboto, Arial, sans-serif; padding: 18px 24px;
     }
     .${BLOCK_TOAST_CLASS} button {
-      border: none; background: none; color: #3ea6ff; cursor: pointer;
-      font: inherit; font-weight: 600; padding: 0;
+      border: none; border-radius: 18px; background: #3ea6ff; color: #0f0f0f;
+      cursor: pointer; font: inherit; font-weight: 700; padding: 8px 18px;
     }
+    html[dark] .${BLOCK_TOAST_CLASS} { background: #f1f1f1; color: #0f0f0f; }
+    html[dark] .${BLOCK_TOAST_CLASS} button { background: #065fd4; color: #fff; }
     .${BLOCK_BUTTON_CLASS}:hover { background: rgba(200,0,0,.9); }
     .${NOT_INTERESTED_BUTTON_CLASS}:hover { background: rgba(70,70,70,.95); }
     .${WATCH_LATER_BUTTON_CLASS}:hover { background: rgba(0,90,200,.9); }
