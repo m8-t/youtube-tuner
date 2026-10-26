@@ -3,6 +3,14 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.6.1] - 2026-10-26
+
+### Fixed
+
+- The block Undo toast was small and dark on YouTube's dark theme, so it was
+  easy to miss. It is now larger, with a filled Undo button, and uses the
+  opposite of YouTube's theme: light on dark mode, dark on light mode.
+
 ## [1.6.0] - 2026-10-26
 
 ### Changed
