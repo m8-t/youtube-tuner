@@ -3,7 +3,7 @@ export const DEFAULT_CONFIG = {
   ageRule: { enabled: true, maxAgeDays: 1095, minAgeHours: 0 },
   viewRule: { enabled: true, minViews: 5000, graceHours: 48 },
   watchedRule: { enabled: true },
-  blocklistRule: { enabled: true },
+  blocklistRule: { enabled: true, sendNativeFeedback: false },
   titleRule: { enabled: true, patterns: [] },
   updateCheck: { enabled: true },
 };

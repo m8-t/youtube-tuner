@@ -7,6 +7,7 @@ export const NOT_INTERESTED_BUTTON_CLASS = 'ytt-not-interested';
 export const WATCH_LATER_BUTTON_CLASS = 'ytt-watch-later';
 
 const nativeUndoArms = new WeakMap();
+const localBlockHandlers = new WeakMap();
 
 function warnBlockFailure(channelName) {
   try {
@@ -61,6 +62,8 @@ export function attachBlockButtons({
   dismissAction = 'notInterested',
   onNativeAction = runNativeMenuAction,
   registry = nativeUndoRegistry,
+  sendNativeFeedback = false,
+  onLocalBlock = () => {},
 }) {
   for (const element of root.querySelectorAll(tileSelector)) {
     let tile = null;
@@ -128,14 +131,16 @@ export function attachBlockButtons({
         event.stopPropagation();
         const channelName = button.dataset.channelName;
         if (!channelName) return;
-        try {
-          Promise.resolve(onNativeAction({
-            tile: element,
-            action: 'dontRecommendChannel',
-            doc,
-          })).catch(() => {});
-        } catch {
-          // The local block below is intentionally independent of this call.
+        if (button.dataset.native === '1') {
+          try {
+            Promise.resolve(onNativeAction({
+              tile: element,
+              action: 'dontRecommendChannel',
+              doc,
+            })).catch(() => {});
+          } catch {
+            // The local block below is intentionally independent of this call.
+          }
         }
         try {
           Promise.resolve(onBlock(channelName)).catch(() => {
@@ -145,10 +150,18 @@ export function attachBlockButtons({
           // A synchronous storage failure must not escape the click handler.
           warnBlockFailure(channelName);
         }
-        try {
-          registry.arm(element, channelName);
-        } catch {
-          // Undo tracking must never affect the block action.
+        if (button.dataset.native === '1') {
+          try {
+            registry.arm(element, channelName);
+          } catch {
+            // Undo tracking must never affect the block action.
+          }
+        } else {
+          try {
+            localBlockHandlers.get(button)?.(channelName);
+          } catch {
+            // The toast is a convenience and must not affect the block.
+          }
         }
       });
       element.appendChild(button);
@@ -185,12 +198,14 @@ export function attachBlockButtons({
     notInterestedButton.dataset.action = dismissAction;
     notInterestedButton.title = dismissAction === 'hide'
       ? 'Hide from subscriptions feed'
-      : 'Not interested in this video';
+      : 'Not interested (tells YouTube, saved in your account)';
     if (watchLaterButton) {
       watchLaterButton.dataset.videoId = tile.videoId;
     }
     if (button) {
       button.dataset.channelName = tile.channelName;
+      button.dataset.native = sendNativeFeedback ? '1' : '';
+      localBlockHandlers.set(button, onLocalBlock);
       button.title = `Block ${tile.channelName}`;
     }
   }

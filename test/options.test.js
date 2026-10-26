@@ -918,3 +918,40 @@ test('manual refresh acceptance proceeds with the existing refresh flow', async 
   assert.equal(cancelled, 42);
   assert.equal(button.disabled, false);
 });
+
+test('options loads and saves the native feedback checkbox', async (t) => {
+  const mock = installChromeMock({ install: false });
+  await mock.chrome.storage.sync.set({
+    config: { blocklistRule: { enabled: true, sendNativeFeedback: true } },
+  });
+  const documentObject = new JSDOM(
+    readFileSync('options.html', 'utf8'),
+  ).window.document;
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  globalThis.chrome = mock.chrome;
+  globalThis.document = documentObject;
+  t.after(() => {
+    globalThis.chrome = previousChrome;
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+  });
+
+  await main();
+
+  const checkbox = documentObject.getElementById('block-native');
+  assert.equal(checkbox.checked, true);
+
+  checkbox.checked = false;
+  checkbox.dispatchEvent(
+    new documentObject.defaultView.Event('change', { bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    mock.areas.sync.config.blocklistRule.sendNativeFeedback,
+    false,
+  );
+});

@@ -224,6 +224,11 @@ test('count DOM health is exposed for the active tab through sync status', async
     domHealth: 'degraded',
   }, { tab: { id: 41 } });
 
+  const countsReplies = [];
+  handleCounts({ type: 'get-counts', tabId: 41 }, {}, (r) => countsReplies.push(r));
+  handleCounts({ type: 'get-counts', tabId: 99 }, {}, (r) => countsReplies.push(r));
+  assert.deepEqual(countsReplies, [{ hidden: 2, visible: 0 }, null]);
+
   const handleSync = createSyncMessageHandler({
     engine: { status: async () => ({ enabled: false }) },
     getDomHealth: () => domHealthState.active(),

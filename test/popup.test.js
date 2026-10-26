@@ -20,6 +20,7 @@ function popupDocument() {
       <button id="help-dismiss" type="button">Got it</button>
     </section>
     <small id="dom-health-status" class="status-line" hidden></small>
+    <small id="starved-status" class="status-line" hidden></small>
     <form id="title-block-form">
       <input type="text" id="title-block-input">
       <button type="submit">Add to blocked titles</button>
@@ -85,6 +86,7 @@ test('popup lays out filtering, subscriptions, and update controls in order', ()
       'help-panel',
       'help-dismiss',
       'dom-health-status',
+      'starved-status',
       'title-block-form',
       'title-block-input',
       'title-block-status',
@@ -225,8 +227,9 @@ test('popup includes the exact help and subscribed-exemption copy', () => {
 
   assert.equal(
     documentObject.querySelector('#help-panel p').textContent,
-    "👎 tells YouTube you're not interested. 🚫 hides all videos from that " +
-      'channel (stored locally, undo in Options). Videos from channels you ' +
+    "👎 tells YouTube you're not interested (saved in your Google account). " +
+      '🚫 hides all videos from that channel, stored locally only; undo from ' +
+      'the toast or in Options. Videos from channels you ' +
       'subscribe to are never hidden by the age and view rules — collect ' +
       'your subscriptions below.',
   );
@@ -408,7 +411,10 @@ test('popup filtering switch saves, rescans YouTube tabs, and updates badges', a
     enabled: false,
     updateCheck: { enabled: true },
   }]);
-  assert.deepEqual(queries, [{ url: '*://www.youtube.com/*' }]);
+  assert.deepEqual(queries, [
+    { active: true, currentWindow: true },
+    { url: '*://www.youtube.com/*' },
+  ]);
   assert.deepEqual(messages, [
     [41, { type: 'rescan' }],
     [42, { type: 'rescan' }],
@@ -895,4 +901,41 @@ test('popup refresh never calls window.confirm', async (t) => {
   dependencies.documentObject.getElementById('refresh-subs').click();
 
   assert.equal(confirmations, 0);
+});
+
+async function starvedHidden(hidden, visible) {
+  const dependencies = popupDependencies({
+    queryTabs: async () => [{ id: 7 }],
+    sendMessage: async (message) => (
+      message.type === 'get-counts'
+        ? (assert.equal(message.tabId, 7), { hidden, visible })
+        : {}
+    ),
+  });
+  await initializePopup(dependencies);
+  return dependencies.documentObject.getElementById('starved-status').hidden;
+}
+
+test('popup warns when most videos on the tab are hidden', async () => {
+  assert.equal(await starvedHidden(80, 20), false);
+});
+
+test('popup hides the starved warning for small totals or a 50% share', async () => {
+  assert.equal(await starvedHidden(8, 2), true);
+  assert.equal(await starvedHidden(50, 50), true);
+});
+
+test('popup hides the starved warning when the counts query fails', async () => {
+  const dependencies = popupDependencies({
+    queryTabs: async () => [{ id: 7 }],
+    sendMessage: async (message) => {
+      if (message.type === 'get-counts') throw new Error('no worker');
+      return {};
+    },
+  });
+  await initializePopup(dependencies);
+  assert.equal(
+    dependencies.documentObject.getElementById('starved-status').hidden,
+    true,
+  );
 });

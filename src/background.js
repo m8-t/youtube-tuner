@@ -240,8 +240,13 @@ export function createDomHealthState({
   tabs = chrome.tabs,
 } = {}) {
   const byTabId = new Map();
+  const countsByTabId = new Map();
 
   function update(message, tabId) {
+    countsByTabId.set(tabId, {
+      hidden: Number(message?.hidden) || 0,
+      visible: Number(message?.visible) || 0,
+    });
     byTabId.set(
       tabId,
       message?.domHealth === 'degraded' ? 'degraded' : 'ok',
@@ -250,6 +255,11 @@ export function createDomHealthState({
 
   function remove(tabId) {
     byTabId.delete(tabId);
+    countsByTabId.delete(tabId);
+  }
+
+  function counts(tabId) {
+    return countsByTabId.get(tabId) ?? null;
   }
 
   async function active() {
@@ -262,14 +272,20 @@ export function createDomHealthState({
     }
   }
 
-  return { active, remove, update };
+  return { active, counts, remove, update };
 }
 
 export function createCountsMessageHandler({
   domHealthState = createDomHealthState(),
   updateBadge = updateCountsBadge,
 } = {}) {
-  return function handleCountsMessage(message, sender) {
+  return function handleCountsMessage(message, sender, sendResponse) {
+    if (message?.type === 'get-counts') {
+      try {
+        sendResponse?.(domHealthState.counts(message.tabId));
+      } catch {}
+      return;
+    }
     if (message?.type !== 'counts') return;
     const tabId = sender.tab?.id;
     if (tabId === undefined) return;

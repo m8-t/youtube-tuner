@@ -154,10 +154,11 @@
   <body>
     <label><input type="checkbox" id="enabled"> Filtering enabled</label>
     <section id="help-panel">
-      <p>👎 tells YouTube you're not interested. 🚫 hides all videos from that channel (stored locally, undo in Options). Videos from channels you subscribe to are never hidden by the age and view rules — collect your subscriptions below.</p>
+      <p>👎 tells YouTube you're not interested (saved in your Google account). 🚫 hides all videos from that channel, stored locally only; undo from the toast or in Options. Videos from channels you subscribe to are never hidden by the age and view rules — collect your subscriptions below.</p>
       <button id="help-dismiss" type="button">Got it</button>
     </section>
     <small id="dom-health-status" class="status-line" hidden></small>
+    <small id="starved-status" class="status-line" hidden>Most videos here are hidden. Loosening the view or age rules in Options gives YouTube more to show.</small>
 
     <hr>
     <form id="title-block-form">

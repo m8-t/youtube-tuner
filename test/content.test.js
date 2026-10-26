@@ -10,6 +10,7 @@ import {
   createRuntimeLifeline,
   hasStateStorageChange,
   isSupportedRoute,
+  removeContentArtifacts,
   startContentScript,
   startSubscriptionCollectionMode,
   stopPassiveCollectionOnNavigation,
@@ -316,7 +317,7 @@ test('thumbs-down action follows the current surface across SPA navigation', (t)
     button,
   );
   assert.equal(button.dataset.action, 'notInterested');
-  assert.equal(button.title, 'Not interested in this video');
+  assert.equal(button.title, 'Not interested (tells YouTube, saved in your account)');
 });
 
 test('disabling on a supported route leaves a completely clean page', (t) => {
@@ -751,4 +752,15 @@ test('content response only reports a count for a non-empty complete scrape', ()
     names: [],
     complete: true,
   }), { reason: 'scrape-incomplete' });
+});
+
+test('removeContentArtifacts also removes the block toast', async () => {
+  const { showBlockToast, BLOCK_TOAST_CLASS } =
+    await import('../src/dom/block-toast.js');
+  const doc = html('');
+  showBlockToast({ doc, channelName: 'A', onUndo: () => {} });
+
+  removeContentArtifacts(doc);
+
+  assert.equal(doc.querySelector(`.${BLOCK_TOAST_CLASS}`), null);
 });

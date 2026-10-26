@@ -11,6 +11,8 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
+const STARVED_MIN_TOTAL = 20;
+const STARVED_HIDDEN_SHARE = 0.75;
 const LATEST_RELEASE_URL =
   'https://github.com/m8-t/youtube-tuner/releases/latest';
 
@@ -223,6 +225,21 @@ export function createManualUpdateChecker({
   };
 }
 
+async function renderStarvedStatus({ element, queryTabs, sendMessage }) {
+  try {
+    const [tab] = await queryTabs({ active: true, currentWindow: true });
+    if (!Number.isInteger(tab?.id)) return;
+    const counts = await sendMessage({ type: 'get-counts', tabId: tab.id });
+    const hidden = Number(counts?.hidden);
+    const total = hidden + Number(counts?.visible);
+    element.hidden = !(
+      total >= STARVED_MIN_TOTAL && hidden / total > STARVED_HIDDEN_SHARE
+    );
+  } catch {
+    element.hidden = true;
+  }
+}
+
 export async function initializePopup({
   documentObject = document,
   loadMeta = loadSubsMeta,
@@ -258,6 +275,7 @@ export async function initializePopup({
   const syncButton = documentObject.getElementById('sync-now');
   const syncStatus = documentObject.getElementById('sync-status');
   const domHealthStatus = documentObject.getElementById('dom-health-status');
+  const starvedStatus = documentObject.getElementById('starved-status');
   const titleBlockForm = documentObject.getElementById('title-block-form');
   const titleBlockInput = documentObject.getElementById('title-block-input');
   const titleBlockStatus = documentObject.getElementById('title-block-status');
@@ -297,6 +315,13 @@ export async function initializePopup({
       }
     }
   } catch {}
+
+  starvedStatus.hidden = true;
+  await renderStarvedStatus({
+    element: starvedStatus,
+    queryTabs,
+    sendMessage,
+  });
 
   ageElement.textContent = subscriptionAgeText(meta);
   enabledToggle.checked = config.enabled;

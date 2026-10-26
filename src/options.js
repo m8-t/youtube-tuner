@@ -89,6 +89,7 @@ const FIELDS = [
   ['view-grace', 'valueAsNumber', (c) => c.viewRule.graceHours, (c, v) => { c.viewRule.graceHours = v; }],
   ['watched-enabled', 'checked', (c) => c.watchedRule.enabled, (c, v) => { c.watchedRule.enabled = v; }],
   ['block-enabled', 'checked', (c) => c.blocklistRule.enabled, (c, v) => { c.blocklistRule.enabled = v; }],
+  ['block-native', 'checked', (c) => c.blocklistRule.sendNativeFeedback, (c, v) => { c.blocklistRule.sendNativeFeedback = v; }],
   ['title-enabled', 'checked', (c) => c.titleRule.enabled, (c, v) => { c.titleRule.enabled = v; }],
 ];
 

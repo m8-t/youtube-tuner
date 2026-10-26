@@ -223,6 +223,8 @@
     <fieldset>
       <legend>Blocked channels</legend>
       <label><input type="checkbox" id="block-enabled"> Hide blocked channels</label>
+      <label><input type="checkbox" id="block-native"> Also send YouTube's "Don't recommend channel" when blocking</label>
+      <p class="status">Off by default. YouTube stores this in your Google account permanently, even after you remove the extension, and many of them shrink your recommendations to a few channels. Local blocking matches the channel's display name, so a renamed channel can slip through; YouTube's own signal follows the channel.</p>
       <ul id="blocklist"></ul>
       <p class="status" id="blocklist-empty">No channels blocked yet.
         Hover a video and click the 🚫 button.</p>

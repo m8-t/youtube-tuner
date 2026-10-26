@@ -261,12 +261,34 @@ Each readable video tile has a **Not interested** control. This control tries
 to select YouTube's **Not interested** menu item.
 
 A tile also has a **Block channel** control if the channel is not in the known
-subscription set. This control adds the channel to the local blocklist. It also
-tries to select YouTube's **Don't recommend channel** menu item.
+subscription set. This control adds the channel to the local blocklist and
+shows a toast with an **Undo** button. By default it sends nothing to YouTube.
+In the options, under Blocked channels, a switch makes it also select
+YouTube's **Don't recommend channel** menu item.
 
 The native YouTube actions support exact English and German menu labels. If the
 extension cannot find one exact menu item, it does not select a menu item. The
 local blocklist update does not depend on the native YouTube action.
+
+#### YouTube feedback stays in your account
+
+**Not interested** and **Don't recommend channel** are YouTube feedback. YouTube
+stores them in your Google account. They stay there after you remove the
+extension. With many **Don't recommend channel** entries, the home feed can
+shrink to a few channels. That is why the block control is local-only by
+default.
+
+YouTube stores the feedback under the account that is active on YouTube. If you
+use a Brand Account, switch to it first, or the feedback page looks empty. To
+review or delete the feedback, open YouTube > History > Manage all history >
+Other activity > YouTube user feedback. My Activity deletes it one day at a
+time only. [Issue #1](https://github.com/m8-t/youtube-tuner/issues/1) has a
+console script that deletes all days in one run.
+
+Your watch history also shapes the feed. Subscribed channels skip the age and
+view rules. If you mostly watch those channels, the feed narrows to them even
+without feedback. Loosen the view and age rules, or prune the watch history,
+to widen the feed again.
 
 ![A watch page with the filtered sidebar and the tile
 controls](assets/watch-page.jpg)
@@ -294,7 +316,8 @@ action labels (the menu items and the subscribe button) are not verified.
 If a menu label does not match exactly, the extension does not select a menu
 item. If a subscribe-button label does not match exactly, the extension does
 not change the subscription list. The **Block channel** control updates the
-local blocklist independently of the menu label.
+local blocklist independently of the menu label. Its native action is off by
+default.
 
 The automated tests use fixtures from live pages: three German pages and one
 English sidebar page. The age and view parsers have test coverage in both

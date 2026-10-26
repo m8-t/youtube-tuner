@@ -5,11 +5,12 @@ import { createApplier } from './dom/applier.js';
 import { injectStyles } from './dom/styles.js';
 import { collapseEmptySections } from './dom/empty-sections.js';
 import { attachBlockButtons } from './dom/block-button.js';
+import { showBlockToast, removeBlockToast } from './dom/block-toast.js';
 import { createNativeUndoWatcher } from './dom/native-undo.js';
 import { createStarvationNudge } from './dom/starvation.js';
 import { loadConfig, onConfigChange } from './storage/config.js';
 import { loadWatched, addWatched } from './storage/watched.js';
-import { loadBlocklist, addBlocked } from './storage/blocklist.js';
+import { loadBlocklist, addBlocked, removeBlocked } from './storage/blocklist.js';
 import { loadOverrides } from './storage/overrides.js';
 import {
   addSubNames,
@@ -257,6 +258,7 @@ function onNavigate() {
 }
 
 export function removeContentArtifacts(doc = document) {
+  removeBlockToast(doc);
   for (const button of doc.querySelectorAll('button[class*="ytt-"]')) {
     if ([...button.classList].some((name) => name.startsWith('ytt-'))) {
       button.remove();
@@ -280,6 +282,7 @@ export function createFilteringLifecycle({
   getPathname,
   sendMessage = (message) => chrome.runtime.sendMessage(message),
   addBlockedChannel = addBlocked,
+  removeBlockedChannel = removeBlocked,
   nativeUndoWatcher = createNativeUndoWatcher({ doc: documentObject }),
 } = {}) {
   const root = documentObject.documentElement;
@@ -337,6 +340,22 @@ export function createFilteringLifecycle({
         await addBlockedChannel(channelName);
         getState().blocklist.add(channelName);
         scan();
+      },
+      sendNativeFeedback: getConfig().blocklistRule?.sendNativeFeedback === true,
+      onLocalBlock: (channelName) => {
+        showBlockToast({
+          doc: documentObject,
+          channelName,
+          onUndo: async () => {
+            try {
+              await removeBlockedChannel(channelName);
+              getState().blocklist.delete(channelName);
+              scan();
+            } catch {
+              // Undo failures must not surface in the page.
+            }
+          },
+        });
       },
     });
   }
