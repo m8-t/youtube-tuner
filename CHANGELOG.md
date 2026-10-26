@@ -3,6 +3,24 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.7.0] - 2026-10-26
+
+### Added
+
+- Optional sync of the collected subscription list. Turn on "Sync subscription
+  list" in the Sync section of the options. It is off by default; use it only
+  if every device uses the same YouTube account. A second device then takes
+  the synced list and needs no "Refresh now", and one full collection on any
+  device updates the list and its age everywhere. After turning it on, run
+  "Refresh now" once on one device. Every device needs 1.7.0 or later, because
+  older versions drop the synced list when they upload.
+
+### Fixed
+
+- Passive collection on `youtube.com/feed/channels` could save a partial list
+  if the page stopped loading before you reached the end. It now also requires
+  the page to be scrolled to the bottom, like "Refresh now".
+
 ## [1.6.1] - 2026-10-26
 
 ### Fixed
