@@ -8,6 +8,7 @@ test('default minimum view count is 5000', () => {
   assert.equal(DEFAULT_CONFIG.ageRule.minAgeHours, 0);
   assert.deepEqual(DEFAULT_CONFIG.titleRule, { enabled: true, patterns: [] });
   assert.equal(DEFAULT_CONFIG.updateCheck.enabled, true);
+  assert.deepEqual(DEFAULT_CONFIG.subsSync, { enabled: false });
   assert.deepEqual(DEFAULT_CONFIG.blocklistRule, {
     enabled: true,
     sendNativeFeedback: false,

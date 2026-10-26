@@ -16,7 +16,9 @@ import {
   setConfigField,
   setManualSub,
   setOverride,
+  setSubsEntry,
 } from './document.js';
+import { SUBS_FORMAT_VERSION, normalizeNames } from '../storage/subs.js';
 import { merge } from './merge.js';
 import { docToStorage, storageToDoc } from './project.js';
 import { ConflictError } from './webdav.js';
@@ -139,7 +141,7 @@ function capabilityError(capabilities) {
 
 function clockCounter(doc, timestamp) {
   let counter = 0;
-  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs']) {
+  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs']) {
     for (const entry of Object.values(doc[field] ?? {})) {
       if (
         entry.clock?.actorId === doc.actorId
@@ -171,9 +173,18 @@ function setsEqual(left, right) {
     && [...left].every((value) => right.has(value));
 }
 
+function usableSubsEntry(value) {
+  return isObject(value)
+    && Array.isArray(value.ids)
+    && value.format === SUBS_FORMAT_VERSION
+    && Number.isFinite(value.fetchedAt)
+    ? value
+    : null;
+}
+
 function maximumClockTimestamp(doc) {
   let maximum = 0;
-  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs']) {
+  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs']) {
     for (const entry of Object.values(doc[field] ?? {})) {
       maximum = Math.max(maximum, entry.clock?.ts ?? 0);
     }
@@ -242,11 +253,15 @@ export function createSyncEngine({
   async function readProjectedState() {
     const [synced, local] = await Promise.all([
       storage.sync.get(['config', 'channelOverrides']),
-      storage.local.get(['blocklist', 'manualSubs', 'watched']),
+      storage.local.get(['blocklist', 'manualSubs', 'subs', 'watched']),
     ]);
     const overrides = synced.channelOverrides;
+    const config = mergeConfig(DEFAULT_CONFIG, synced.config);
+    const subsEntry = usableSubsEntry(local.subs);
     return {
-      config: mergeConfig(DEFAULT_CONFIG, synced.config),
+      config,
+      subsEntry,
+      subs: config.subsSync?.enabled === true ? subsEntry : null,
       overrides: overrides instanceof Map || isObject(overrides)
         ? overrides
         : {},
@@ -296,11 +311,12 @@ export function createSyncEngine({
       state.watched,
       actorId ?? createActorId(),
       timestamp,
+      state.subs,
     );
   }
 
   function demoteSnapshotClocks(doc) {
-    const fields = ['configFields', 'overrides', 'blocklist', 'manualSubs'];
+    const fields = ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs'];
     for (const field of fields) {
       for (const entry of Object.values(doc[field])) {
         entry.clock = createClock(0, entry.clock.counter, doc.actorId);
@@ -357,8 +373,14 @@ export function createSyncEngine({
       }
     }
 
-    for (const field of ['blocklist', 'manualSubs']) {
-      const setter = field === 'blocklist' ? setBlocklistEntry : setManualSub;
+    const presenceSetters = {
+      blocklist: setBlocklistEntry,
+      manualSubs: setManualSub,
+      subs: setSubsEntry,
+    };
+    for (const field of ['blocklist', 'manualSubs', 'subs']) {
+      if (field === 'subs' && projectedState.subs === null) continue;
+      const setter = presenceSetters[field];
       for (const name of Object.keys(snapshot[field])) {
         if (doc[field][name]?.present !== true) {
           setter(doc, name, true, nextClock());
@@ -369,6 +391,13 @@ export function createSyncEngine({
           setter(doc, name, false, nextClock());
         }
       }
+    }
+
+    if (projectedState.subs !== null) {
+      doc.subsFetchedAt = Math.max(
+        doc.subsFetchedAt,
+        projectedState.subs.fetchedAt,
+      );
     }
 
     const projectedWatched = new Set(docToStorage(doc).watched);
@@ -428,6 +457,24 @@ export function createSyncEngine({
     }
     if (!setsEqual(asSet(current.manualSubs), asSet(desired.manualSubs))) {
       localWrites.manualSubs = desired.manualSubs;
+    }
+    if (
+      desiredConfig.subsSync?.enabled === true
+      && (desired.subs.length > 0 || desired.subsFetchedAt > 0)
+    ) {
+      const localFetchedAt = state.subsEntry?.fetchedAt ?? 0;
+      const fetchedAt = Math.max(localFetchedAt, desired.subsFetchedAt);
+      if (
+        state.subsEntry === null
+        || !setsEqual(normalizeNames(state.subsEntry.ids), asSet(desired.subs))
+        || fetchedAt !== localFetchedAt
+      ) {
+        localWrites.subs = {
+          format: SUBS_FORMAT_VERSION,
+          ids: desired.subs,
+          fetchedAt,
+        };
+      }
     }
     if (!equal(current.watched, desired.watched)) {
       localWrites.watched = desired.watched;

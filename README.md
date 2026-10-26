@@ -208,9 +208,20 @@ extension can synchronize its data through your own WebDAV storage instead.
 Nextcloud, mailbox.org, and most hosting providers offer WebDAV.
 
 The sync transfers the settings, the channel rules, the blocklist, the
-manual subscription entries, and the watched history. It does not transfer
-the collected subscription list; each device collects that list from YouTube
+manual subscription entries, and the watched history. The collected
+subscription list transfers only if you turn on **Sync subscription list**
+in the Sync section. Without it, each device collects that list from YouTube
 itself.
+
+Turn on **Sync subscription list** only if every device uses the same YouTube
+account. With different accounts, for example a Brand Account on one device,
+the lists mix. The switch is a synced setting, so one device is enough. A
+device without its own list then takes the synced list and needs no
+**Refresh now**. A full collection on any device updates the list and its
+age on all devices. After you turn the switch on, select **Refresh now** on
+one device so that all devices start from the same complete list. All
+devices need version 1.7.0 or later: older versions drop the synced list when
+they upload.
 
 The extension encrypts the data with a passphrase before each upload
 (AES-256-GCM, key from PBKDF2 with 600000 iterations). The storage provider

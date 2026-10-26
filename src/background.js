@@ -413,7 +413,7 @@ export function createSyncStorageChangeHandler({
     const keys = area === 'sync'
       ? ['config', 'channelOverrides']
       : area === 'local'
-        ? ['blocklist', 'manualSubs', 'watched']
+        ? ['blocklist', 'manualSubs', 'subs', 'watched']
         : [];
     if (!keys.some((key) => changes[key])) return false;
 

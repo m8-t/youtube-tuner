@@ -8,6 +8,7 @@ import {
   setConfigField,
   setManualSub,
   setOverride,
+  setSubsEntry,
 } from './document.js';
 
 function isObject(value) {
@@ -71,6 +72,9 @@ export function docToStorage(value) {
   const manualSubs = Object.entries(doc.manualSubs)
     .filter(([, entry]) => entry.present)
     .map(([name]) => name);
+  const subs = Object.entries(doc.subs)
+    .filter(([, entry]) => entry.present)
+    .map(([name]) => name);
   const watched = Object.entries(doc.watched)
     .filter(([, entry]) => (
       entry.lastSeen > doc.clearedBefore
@@ -86,6 +90,8 @@ export function docToStorage(value) {
     channelOverrides,
     blocklist,
     manualSubs,
+    subs,
+    subsFetchedAt: doc.subsFetchedAt,
     watched,
   };
 }
@@ -98,6 +104,7 @@ export function storageToDoc(
   watched,
   actorId,
   now,
+  subs = null,
 ) {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new TypeError('now must be a non-negative integer timestamp');
@@ -139,6 +146,18 @@ export function storageToDoc(
     } catch {
       // Malformed stored entries are discarded.
     }
+  }
+  if (isObject(subs) && Number.isSafeInteger(subs.fetchedAt) && subs.fetchedAt >= 0) {
+    for (const name of iterable(subs.ids)) {
+      const channelName = normalizeChannelName(name);
+      if (!channelName) continue;
+      try {
+        setSubsEntry(doc, channelName, true, nextClock());
+      } catch {
+        // Malformed stored entries are discarded.
+      }
+    }
+    doc.subsFetchedAt = subs.fetchedAt;
   }
 
   const ids = [...iterable(watched)]

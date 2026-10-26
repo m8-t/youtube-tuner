@@ -38,7 +38,7 @@ function compareEntries(left, right) {
 function isTombstone(field, entry) {
   return field === 'overrides'
     ? entry.value === null
-    : (field === 'blocklist' || field === 'manualSubs')
+    : (field === 'blocklist' || field === 'manualSubs' || field === 'subs')
       && entry.present === false;
 }
 
@@ -107,7 +107,7 @@ export function merge(localDoc, remoteDoc, now) {
     .at(-1);
   const merged = create(actorId);
 
-  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs']) {
+  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs']) {
     merged[field] = mergeLww(
       field,
       local[field],
@@ -116,6 +116,7 @@ export function merge(localDoc, remoteDoc, now) {
     );
   }
 
+  merged.subsFetchedAt = Math.max(local.subsFetchedAt, remote.subsFetchedAt);
   merged.clearedBefore = Math.max(
     local.clearedBefore,
     remote.clearedBefore,

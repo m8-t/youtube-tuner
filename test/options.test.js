@@ -955,3 +955,37 @@ test('options loads and saves the native feedback checkbox', async (t) => {
     false,
   );
 });
+
+test('options loads and saves the subscription sync checkbox', async (t) => {
+  const mock = installChromeMock({ install: false });
+  await mock.chrome.storage.sync.set({
+    config: { subsSync: { enabled: true } },
+  });
+  const documentObject = new JSDOM(
+    readFileSync('options.html', 'utf8'),
+  ).window.document;
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  globalThis.chrome = mock.chrome;
+  globalThis.document = documentObject;
+  t.after(() => {
+    globalThis.chrome = previousChrome;
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+  });
+
+  await main();
+
+  const checkbox = documentObject.getElementById('subs-sync-enabled');
+  assert.equal(checkbox.checked, true);
+
+  checkbox.checked = false;
+  checkbox.dispatchEvent(
+    new documentObject.defaultView.Event('change', { bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mock.areas.sync.config.subsSync.enabled, false);
+});

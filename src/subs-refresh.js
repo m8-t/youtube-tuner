@@ -419,6 +419,7 @@ export function observeSubscriptionList({
 
       if (
         !continuation.present &&
+        atBottom(documentObject.defaultView, height) &&
         previousContinuationPresent === false &&
         names.length > 0 &&
         names.length === previousCount &&

@@ -90,6 +90,7 @@ const FIELDS = [
   ['watched-enabled', 'checked', (c) => c.watchedRule.enabled, (c, v) => { c.watchedRule.enabled = v; }],
   ['block-enabled', 'checked', (c) => c.blocklistRule.enabled, (c, v) => { c.blocklistRule.enabled = v; }],
   ['block-native', 'checked', (c) => c.blocklistRule.sendNativeFeedback, (c, v) => { c.blocklistRule.sendNativeFeedback = v; }],
+  ['subs-sync-enabled', 'checked', (c) => c.subsSync.enabled, (c, v) => { c.subsSync.enabled = v; }],
   ['title-enabled', 'checked', (c) => c.titleRule.enabled, (c, v) => { c.titleRule.enabled = v; }],
 ];
 

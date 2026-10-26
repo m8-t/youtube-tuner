@@ -6,4 +6,5 @@ export const DEFAULT_CONFIG = {
   blocklistRule: { enabled: true, sendNativeFeedback: false },
   titleRule: { enabled: true, patterns: [] },
   updateCheck: { enabled: true },
+  subsSync: { enabled: false },
 };

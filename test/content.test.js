@@ -152,6 +152,7 @@ test('filtering routes are exactly the home feed, watch page, and subscriptions 
 
 test('content state refreshes for local state and sync channel overrides', () => {
   assert.equal(hasStateStorageChange({ watched: {} }, 'local'), true);
+  assert.equal(hasStateStorageChange({ subs: {} }, 'local'), true);
   assert.equal(
     hasStateStorageChange({ channelOverrides: {} }, 'sync'),
     true,

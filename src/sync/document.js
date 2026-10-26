@@ -122,6 +122,8 @@ export function create(actorId = createActorId()) {
     overrides: {},
     blocklist: {},
     manualSubs: {},
+    subs: {},
+    subsFetchedAt: 0,
     watched: {},
     clearedBefore: 0,
     prunedBefore: 0,
@@ -201,6 +203,10 @@ export function setBlocklistEntry(doc, pattern, value, clock) {
 
 export function setManualSub(doc, channelName, value, clock) {
   return setPresence(doc, 'manualSubs', channelName, value, clock);
+}
+
+export function setSubsEntry(doc, channelName, value, clock) {
+  return setPresence(doc, 'subs', channelName, value, clock);
 }
 
 export function recordWatched(doc, id, lastSeen, clock) {
@@ -328,6 +334,14 @@ export function normalizeDocument(value) {
     normalizePresence,
     normalizeChannelKey,
   );
+  doc.subs = normalizeLwwMap(
+    value.subs,
+    normalizePresence,
+    normalizeChannelKey,
+  );
+  if (Number.isSafeInteger(value.subsFetchedAt) && value.subsFetchedAt >= 0) {
+    doc.subsFetchedAt = value.subsFetchedAt;
+  }
 
   for (const [id, entry] of sortedEntries(value.watched)) {
     if (!isSafeKey(id) || !isObject(entry)) continue;

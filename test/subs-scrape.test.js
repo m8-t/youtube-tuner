@@ -642,6 +642,31 @@ test('passive mode saves after the sentinel disappears and names stay stable', a
   assert.equal(controller.isActive(), false);
 });
 
+test('passive mode does not save while the page is not scrolled to the bottom', () => {
+  const documentObject = html(channelMarkup(4, false));
+  Object.defineProperty(documentObject.documentElement, 'scrollHeight', {
+    configurable: true,
+    value: 5000,
+  });
+  const saves = [];
+  class Observer {
+    observe() {}
+    disconnect() {}
+  }
+
+  const controller = observeSubscriptionList({
+    documentObject,
+    MutationObserverObject: Observer,
+    scheduleTimeout: () => 1,
+    cancelTimeout: () => {},
+    save: async (names) => saves.push(names),
+  });
+  for (let i = 0; i < 6; i += 1) controller.check();
+
+  assert.equal(saves.length, 0);
+  assert.equal(controller.isActive(), true);
+});
+
 test('stopping passive mode on navigation saves nothing and reports no error', async () => {
   const documentObject = html(channelMarkup(4, true));
   let saveCalls = 0;
