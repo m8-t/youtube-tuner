@@ -3,6 +3,27 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.6.0] - 2026-10-26
+
+### Changed
+
+- The block button is local-only by default. It used to also send YouTube's
+  "Don't recommend channel". YouTube keeps that feedback in your Google account
+  permanently, and many entries can shrink the home feed to a few channels
+  ([#1](https://github.com/m8-t/youtube-tuner/issues/1)). To get the old
+  behavior back, turn on "Also send YouTube's 'Don't recommend channel'" under
+  Blocked channels in the options. Feedback already sent stays in your account;
+  the README explains how to find and delete it.
+- The thumbs-down tooltip and the popup help now say that "Not interested" is
+  saved in your Google account.
+
+### Added
+
+- A toast with an Undo button after a local block. YouTube's own undo toast
+  only appeared because of the native action.
+- The popup warns when most videos on the current page are hidden and suggests
+  loosening the view or age rules.
+
 ## [1.5.0] - 2026-10-25
 
 ### Added
