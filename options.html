@@ -203,6 +203,14 @@
     </fieldset>
 
     <fieldset>
+      <legend>Hidden videos</legend>
+      <p class="status">Videos you hid with the eye control on a tile. This
+        stays in the extension; YouTube is not told.
+        <span id="hidden-count"></span>
+        <button id="hidden-clear" type="button">Show them again</button></p>
+    </fieldset>
+
+    <fieldset>
       <legend>Channel rules</legend>
       <p class="status">Override filtering rules for individual channels.</p>
       <table>
@@ -223,11 +231,49 @@
     <fieldset>
       <legend>Blocked channels</legend>
       <label><input type="checkbox" id="block-enabled"> Hide blocked channels</label>
-      <label><input type="checkbox" id="block-native"> Also send YouTube's "Don't recommend channel" when blocking</label>
-      <p class="status">Off by default. YouTube stores this in your Google account permanently, even after you remove the extension, and many of them shrink your recommendations to a few channels. Local blocking matches the channel's display name, so a renamed channel can slip through; YouTube's own signal follows the channel.</p>
-      <ul id="blocklist"></ul>
+      <p class="status">Blocking stays in the extension; YouTube is not told.
+        Where a video tile shows the channel's handle, the block is tied to
+        that handle, so another channel with the same name is not hidden and
+        a renamed channel stays blocked. The toast after a block can limit it
+        to 30 days.</p>
+      <table id="block-table" hidden>
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th>Matched by</th>
+            <th>Lasts</th>
+            <th>Still recommended</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="block-rows"></tbody>
+      </table>
       <p class="status" id="blocklist-empty">No channels blocked yet.
-        Hover a video and click the 🚫 button.</p>
+        Hover a video and use the block control.</p>
+      <p class="status" id="block-persistent" hidden></p>
+      <p class="status" id="block-unseen" hidden></p>
+      <button id="block-prune" type="button" hidden>Unblock the channels not seen for 180 days</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>YouTube feedback (optional)</legend>
+      <label><input type="checkbox" id="feedback-enabled"> Allow sending feedback to YouTube</label>
+      <p class="status">Off by default. With this on, video tiles get one more
+        control that sends YouTube's "Not interested". YouTube keeps such
+        feedback in your Google account, also after you remove the extension,
+        and a large amount of it can shrink your recommendations to a few
+        channels. That is why there is a weekly limit.</p>
+      <label>Send at most
+        <input type="number" id="feedback-limit" min="0" max="20" step="1"> signals per week</label>
+      <label><input type="checkbox" id="block-native"> Also send YouTube's "Don't recommend channel" when blocking</label>
+      <p class="status">This is the strongest signal and it is permanent. It
+        counts against the weekly limit and needs the switch above.</p>
+      <p class="status" id="feedback-status"></p>
+      <p class="status">Sent so far (newest first). To delete feedback at
+        YouTube: History, Manage all history, Other activity, YouTube user
+        feedback.</p>
+      <ul id="feedback-ledger"></ul>
+      <p class="status" id="feedback-ledger-empty">Nothing has been sent.</p>
     </fieldset>
 
     <fieldset>

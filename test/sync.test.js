@@ -9,8 +9,10 @@ import {
   parse,
   recordWatched,
   serialize,
+  setBlockMeta,
   setBlocklistEntry,
   setConfigField,
+  setHiddenEntry,
   setManualSub,
   setOverride,
 } from '../src/sync/document.js';
@@ -175,7 +177,58 @@ test('document parser drops malformed fields and rejects newer versions', () => 
   doc.overrides.bad = { value: { age: { maxAgeDays: -1 } }, clock: clock(NOW, 3) };
   doc.watched.bad = { lastSeen: 'yesterday' };
   assert.deepEqual(Object.keys(parse(serialize(doc)).configFields), ['valid']);
-  assert.throws(() => parse('{"v":2,"actorId":"future"}'), DocumentError);
+  assert.throws(() => parse('{"v":3,"actorId":"future"}'), DocumentError);
+});
+
+test('a version 1 document is read and upgraded to version 2', () => {
+  const upgraded = parse(JSON.stringify({
+    v: 1,
+    actorId: 'old-device',
+    blocklist: { News: { present: true, clock: clock(NOW, 1) } },
+    watched: { 'video-1': { lastSeen: NOW } },
+  }));
+
+  assert.equal(upgraded.v, 2);
+  assert.equal(upgraded.blocklist.News.present, true);
+  assert.deepEqual(upgraded.blockMeta, {});
+  assert.deepEqual(upgraded.hidden, {});
+  assert.deepEqual(upgraded.watched, { 'video-1': { lastSeen: NOW } });
+});
+
+test('block metadata and hidden videos merge entry by entry and keep tombstones', () => {
+  const a = create('actor-a');
+  const b = create('actor-b');
+  setBlocklistEntry(a, 'News', true, clock(NOW, 1));
+  setBlockMeta(a, 'News', { handles: ['@News', 'bad handle'], until: NOW + DAY_MS, addedAt: NOW }, clock(NOW, 2));
+  setHiddenEntry(a, 'video-1', true, clock(NOW, 3));
+  setHiddenEntry(a, 'video-2', true, clock(NOW, 4));
+  // Device B unhid video-2 later and made the snooze permanent.
+  setHiddenEntry(b, 'video-2', false, clock(NOW + 10, 1, 'actor-b'));
+  setBlockMeta(b, 'News', { handles: ['@news'], until: null, addedAt: NOW }, clock(NOW + 10, 2, 'actor-b'));
+
+  const merged = merge(a, b, NOW + 20);
+  assert.deepEqual(merged, merge(b, a, NOW + 20));
+  assert.deepEqual(merged.blockMeta.News.value, {
+    handles: ['@news'],
+    until: null,
+    addedAt: NOW,
+  });
+  assert.equal(merged.hidden['video-1'].present, true);
+  assert.equal(merged.hidden['video-2'].present, false);
+
+  const stored = docToStorage(merged);
+  assert.deepEqual(stored.hidden, ['video-1']);
+  assert.deepEqual(stored.blockMeta, {
+    News: { handles: ['@news'], until: null, addedAt: NOW },
+  });
+});
+
+test('block metadata of an unblocked channel is not projected', () => {
+  const doc = create('actor-a');
+  setBlocklistEntry(doc, 'Gone', false, clock(NOW, 1));
+  setBlockMeta(doc, 'Gone', { handles: ['@gone'] }, clock(NOW, 2));
+
+  assert.deepEqual(docToStorage(doc).blockMeta, {});
 });
 
 test('encryption round-trips a document with a non-extractable AES key', async () => {

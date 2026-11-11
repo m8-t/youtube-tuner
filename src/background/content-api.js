@@ -6,20 +6,35 @@
 import { loadConfig } from '../storage/config.js';
 import {
   addBlocked,
+  loadBlockMeta,
   loadBlocklist,
+  pinBlockHandle,
+  pruneExpiredBlocks,
   removeBlocked,
+  snoozeBlocked,
 } from '../storage/blocklist.js';
+import { addHidden, loadHidden, removeHidden } from '../storage/hidden.js';
 import { addWatched, loadWatched } from '../storage/watched.js';
 import { loadOverrides } from '../storage/overrides.js';
 import {
   addSubNames,
   loadManualSubs,
+  loadSubHandles,
   loadSubs,
   loadSubsMeta,
   removeSubNames,
   saveSubs,
 } from '../storage/subs.js';
+import {
+  FEEDBACK_ACTIONS,
+  loadFeedbackQueue,
+  releaseFeedback,
+  reserveFeedback,
+  setFeedbackQueued,
+} from '../storage/feedback.js';
+import { pruneBlockStats, recordBlockHits } from '../storage/block-stats.js';
 import { cleanName, cleanNames, isVideoId } from '../storage/schema.js';
+import { normalizeChannelKey } from '../channel-name.js';
 
 export const SUBS_REFRESH_ATTEMPTED_KEY = 'subsRefreshAttemptedAt';
 export const YOUTUBE_TAB_PATTERN = 'https://www.youtube.com/*';
@@ -29,44 +44,105 @@ export const CONTENT_STATE_KEYS = Object.freeze([
   'config',
   'channelOverrides',
   'blocklist',
+  'blockMeta',
+  'hiddenVideos',
   'subs',
   'manualSubs',
   'watched',
+  'feedbackQueue',
 ]);
 
 // A subscribe click concerns one channel; nothing legitimate sends more.
 const MAX_CAPTURED_SUBS = 20;
+const MAX_STATS_CHANNELS = 200;
+
+function cleanHandles(handles, names) {
+  const output = {};
+  if (handles === null || typeof handles !== 'object' || Array.isArray(handles)) {
+    return output;
+  }
+  for (const name of names) {
+    if (!Object.hasOwn(handles, name)) continue;
+    const handle = normalizeChannelKey(handles[name]);
+    if (handle) output[name] = handle;
+  }
+  return output;
+}
+
+function cleanHits(hits) {
+  const output = {};
+  if (hits === null || typeof hits !== 'object' || Array.isArray(hits)) {
+    return output;
+  }
+  for (const [rawName, count] of Object.entries(hits)) {
+    const name = cleanName(rawName);
+    if (!name || !Number.isSafeInteger(count) || count <= 0) continue;
+    output[name] = count;
+    if (Object.keys(output).length >= MAX_STATS_CHANNELS) break;
+  }
+  return output;
+}
 
 export async function readContentState() {
-  const [config, subs, subsMeta, manualSubs, blocklist, watched, overrides] =
-    await Promise.all([
-      loadConfig(),
-      loadSubs(),
-      loadSubsMeta(),
-      loadManualSubs(),
-      loadBlocklist(),
-      loadWatched(),
-      loadOverrides(),
-    ]);
+  const [
+    config,
+    subs,
+    subsMeta,
+    subHandles,
+    manualSubs,
+    blocklist,
+    blockMeta,
+    hidden,
+    watched,
+    overrides,
+    feedbackQueue,
+  ] = await Promise.all([
+    loadConfig(),
+    loadSubs(),
+    loadSubsMeta(),
+    loadSubHandles(),
+    loadManualSubs(),
+    loadBlocklist(),
+    loadBlockMeta(),
+    loadHidden(),
+    loadWatched(),
+    loadOverrides(),
+    loadFeedbackQueue(),
+  ]);
   return {
     config,
     subs: subs === null ? null : [...subs],
     subsStale: subsMeta === null || subsMeta.stale === true,
+    subHandles: Object.fromEntries(subHandles),
     manualSubs: [...manualSubs],
     blocklist: [...blocklist],
+    blockMeta: Object.fromEntries(blockMeta),
+    hiddenVideos: [...hidden],
     watched: [...watched],
     overrides: Object.fromEntries(overrides),
+    // Only channels that are still blocked can be waiting for feedback.
+    feedbackQueue: feedbackQueue.filter((name) => blocklist.has(name)),
   };
 }
 
 const defaultStore = {
   readState: readContentState,
+  loadConfig,
+  loadBlocklist,
   addWatched,
+  addHidden,
+  removeHidden,
   addBlocked,
   removeBlocked,
+  snoozeBlocked,
+  pinBlockHandle,
   addSubNames,
   removeSubNames,
   saveSubs,
+  reserveFeedback,
+  releaseFeedback,
+  setFeedbackQueued,
+  recordBlockHits,
   async getCollectionAttempt() {
     const stored = await chrome.storage.local.get(SUBS_REFRESH_ATTEMPTED_KEY);
     const at = stored[SUBS_REFRESH_ATTEMPTED_KEY];
@@ -97,11 +173,42 @@ export function createContentApi({
       return true;
     },
 
-    'block-add': async ({ channelName }) => {
+    'hide-add': async ({ videoId }) => {
+      if (!isVideoId(videoId)) return false;
+      await write(() => store.addHidden(videoId));
+      return true;
+    },
+
+    'hide-remove': async ({ videoId }) => {
+      if (!isVideoId(videoId)) return false;
+      await write(() => store.removeHidden(videoId));
+      return true;
+    },
+
+    'block-add': async ({ channelName, handle }) => {
       const name = cleanName(channelName);
       if (!name) return false;
-      await write(() => store.addBlocked(name));
+      await write(() => store.addBlocked(name, {
+        handle: normalizeChannelKey(handle),
+        now: now(),
+      }));
       return true;
+    },
+
+    // Always the fixed snooze length and the background clock: the page
+    // cannot ask for a block that ends in a hundred years, or yesterday.
+    'block-snooze': async ({ channelName }) => {
+      const name = cleanName(channelName);
+      if (!name) return false;
+      return (await write(() => store.snoozeBlocked(name, { now: now() })))
+        === true;
+    },
+
+    'block-pin': async ({ channelName, handle }) => {
+      const name = cleanName(channelName);
+      const key = normalizeChannelKey(handle);
+      if (!name || !key) return false;
+      return (await write(() => store.pinBlockHandle(name, key))) === true;
     },
 
     'block-remove': async ({ channelName }) => {
@@ -111,10 +218,13 @@ export function createContentApi({
       return true;
     },
 
-    'subs-add': async ({ names }) => {
+    'subs-add': async ({ names, handles }) => {
       const cleaned = cleanNames(names, MAX_CAPTURED_SUBS);
       if (cleaned.length === 0) return false;
-      return (await write(() => store.addSubNames(cleaned))) === true;
+      return (await write(() => store.addSubNames(
+        cleaned,
+        cleanHandles(handles, cleaned),
+      ))) === true;
     },
 
     'subs-remove': async ({ names }) => {
@@ -132,11 +242,59 @@ export function createContentApi({
       return true;
     },
 
-    'subs-save': async ({ names }) => {
+    'subs-save': async ({ names, handles }) => {
       const cleaned = cleanNames(names);
       if (cleaned.length === 0) return false;
-      await write(() => store.saveSubs(cleaned));
+      await write(() => store.saveSubs(cleaned, cleanHandles(handles, cleaned)));
       return true;
+    },
+
+    // The budget is decided here, from the stored settings and the stored
+    // log, never from what the page claims.
+    'feedback-reserve': ({ action, videoId, channelName }) => write(async () => {
+      const config = await store.loadConfig();
+      if (config.feedback?.enabled !== true) {
+        return { ok: false, reason: 'disabled' };
+      }
+      if (!FEEDBACK_ACTIONS.includes(action)) {
+        return { ok: false, reason: 'unknown-action' };
+      }
+      if (
+        action === 'dontRecommendChannel'
+        && config.blocklistRule?.sendNativeFeedback !== true
+      ) {
+        return { ok: false, reason: 'disabled' };
+      }
+      return store.reserveFeedback({
+        action,
+        videoId: isVideoId(videoId) ? videoId : '',
+        channelName: cleanName(channelName),
+        limit: config.feedback.weeklyLimit,
+        now: now(),
+      });
+    }),
+
+    'feedback-release': async ({ id }) => {
+      if (typeof id !== 'string' || id.length === 0 || id.length > 64) {
+        return false;
+      }
+      return (await write(() => store.releaseFeedback(id))) === true;
+    },
+
+    'feedback-dequeue': async ({ channelName }) => {
+      const name = cleanName(channelName);
+      if (!name) return false;
+      await write(() => store.setFeedbackQueued(name, false));
+      return true;
+    },
+
+    'block-stats': async ({ hits }) => {
+      const cleaned = cleanHits(hits);
+      if (Object.keys(cleaned).length === 0) return false;
+      return (await write(async () => store.recordBlockHits(cleaned, {
+        blocked: await store.loadBlocklist(),
+        now: now(),
+      }))) === true;
     },
   };
 
@@ -203,6 +361,14 @@ export function createStateBroadcaster({
   }
 
   return { broadcast, onStorageChanged };
+}
+
+// Daily housekeeping: end snoozes that ran out and drop statistics for
+// channels that are no longer blocked.
+export async function runBlockMaintenance({ now = Date.now() } = {}) {
+  const expired = await pruneExpiredBlocks(now);
+  await pruneBlockStats(await loadBlocklist());
+  return expired;
 }
 
 // Content scripts can reach chrome.storage unless the extension says

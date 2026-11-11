@@ -1,6 +1,9 @@
 import { COLLAPSED_SECTION_CLASS } from './empty-sections.js';
 
 export const HIDDEN_CLASS = 'ytt-hidden';
+// A held tile keeps its place in the layout but is not visible: YouTube's
+// own menu needs a laid-out tile to open against.
+export const GHOST_CLASS = 'ytt-ghost';
 
 const DEBOUNCE_MS = 100;
 const ELEMENT_NODE = 1;
@@ -23,6 +26,7 @@ export function createApplier({
   // only after a mutation touched it, or on a full scan.
   let cache = new WeakMap();
   let dirty = new WeakSet();
+  let held = new WeakSet();
   let counts = { hidden: 0, visible: 0 };
   let observer = null;
   let timer = null;
@@ -89,7 +93,10 @@ export function createApplier({
         visible += 1;
         continue;
       }
-      if (tile.channelName === null) nullChannelNameTiles += 1;
+      // Shorts tiles never show a channel; they say nothing about DOM health.
+      if (tile.channelName === null && tile.kind !== 'short') {
+        nullChannelNameTiles += 1;
+      }
 
       const previous = applied.get(element);
       if (previous !== undefined && previous !== tile.videoId) {
@@ -98,7 +105,7 @@ export function createApplier({
         applied.delete(element);
       }
 
-      if (apply(element, verdict.hide)) changed = true;
+      if (apply(element, verdict.hide && !held.has(element))) changed = true;
       applied.set(element, tile.videoId);
       tiles.push({ element, tile, verdict });
       if (verdict.hide) hidden += 1;
@@ -212,10 +219,28 @@ export function createApplier({
     for (const section of root.querySelectorAll(`.${COLLAPSED_SECTION_CLASS}`)) {
       section.classList.remove(COLLAPSED_SECTION_CLASS);
     }
+    for (const element of root.querySelectorAll(`.${GHOST_CLASS}`)) {
+      element.classList.remove(GHOST_CLASS);
+    }
     cache = new WeakMap();
     dirty = new WeakSet();
+    held = new WeakSet();
     counts = { hidden: 0, visible: 0 };
   }
 
-  return { scan, start, stop, getCounts: () => counts };
+  // Keeps a tile laid out (but invisible) while a native action runs on it,
+  // whatever the scans in between decide.
+  function hold(element) {
+    held.add(element);
+    element.classList.remove(HIDDEN_CLASS);
+    element.classList.add(GHOST_CLASS);
+  }
+
+  function release(element) {
+    held.delete(element);
+    element.classList.remove(GHOST_CLASS);
+    if (observer) scan();
+  }
+
+  return { scan, start, stop, hold, release, getCounts: () => counts };
 }

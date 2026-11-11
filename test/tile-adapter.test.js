@@ -246,3 +246,80 @@ test('garbage input returns null instead of throwing', () => {
   assert.equal(readTile(undefined), null);
   assert.equal(readTile({}), null);
 });
+
+test('IDENTITY: a home tile exposes the channel handle from its channel link', () => {
+  const doc = loadFixture('home-de.html', 'de');
+  const tile = readTile(doc.querySelector('ytd-rich-item-renderer'));
+  assert.equal(tile.channelHandle, '@diggingthegreats');
+  assert.equal(tile.kind, 'video');
+});
+
+test('IDENTITY: a sidebar tile has a name but no handle', () => {
+  const doc = loadFixture('sidebar-en.html');
+  const tiles = [...doc.querySelectorAll('yt-lockup-view-model')]
+    .map(readTile)
+    .filter(Boolean);
+  assert.ok(tiles.length > 0);
+  assert.ok(tiles.every((tile) => tile.channelHandle === null));
+  assert.ok(tiles.some((tile) => typeof tile.channelName === 'string'));
+});
+
+test('IDENTITY: handles are lowercased and percent-decoded, channel IDs kept', () => {
+  const doc = html(`
+    <yt-lockup-view-model id="a">
+      <a href="/watch?v=video000001"></a>
+      <a href="/@Some%C3%9Cser/videos">Some User</a>
+    </yt-lockup-view-model>
+    <yt-lockup-view-model id="b">
+      <a href="/watch?v=video000002"></a>
+      <a href="/channel/UCabcdefghijklmnopqrstuv">Id Channel</a>
+    </yt-lockup-view-model>
+    <yt-lockup-view-model id="c">
+      <a href="/watch?v=video000003"></a>
+      <a href="/@">Broken</a>
+    </yt-lockup-view-model>`);
+  assert.equal(readTile(doc.querySelector('#a')).channelHandle, '@someüser');
+  assert.equal(
+    readTile(doc.querySelector('#b')).channelHandle,
+    'UCabcdefghijklmnopqrstuv',
+  );
+  assert.equal(readTile(doc.querySelector('#c')).channelHandle, null);
+});
+
+test('a legacy search result takes its channel name from the channel link', () => {
+  const doc = html(`
+    <ytd-video-renderer>
+      <a id="video-title" href="/watch?v=video000001" title="A title">A title</a>
+      <ytd-channel-name><a href="/@legacy">  Legacy Channel  </a></ytd-channel-name>
+    </ytd-video-renderer>`);
+  const tile = readTile(doc.querySelector('ytd-video-renderer'));
+  assert.equal(tile.channelName, 'Legacy Channel');
+  assert.equal(tile.channelHandle, '@legacy');
+});
+
+test('a Shorts tile is readable by its shorts link and marked as a short', () => {
+  const doc = html(`
+    <ytd-rich-item-renderer>
+      <a href="/shorts/short000001"></a>
+    </ytd-rich-item-renderer>`);
+  const tile = readTile(doc.querySelector('ytd-rich-item-renderer'));
+  assert.equal(tile.videoId, 'short000001');
+  assert.equal(tile.kind, 'short');
+  assert.equal(tile.channelName, null);
+});
+
+test('a multi-line metadata row yields a single-line channel name', () => {
+  const doc = html(`
+    <yt-lockup-view-model>
+      <a href="/watch?v=video000001"></a>
+      <span aria-label="Collaboration channels"></span>
+      <div class="ytContentMetadataViewModelMetadataRow">
+        First Channel
+        and 2 more
+      </div>
+    </yt-lockup-view-model>`);
+  assert.equal(
+    readTile(doc.querySelector('yt-lockup-view-model')).channelName,
+    'First Channel',
+  );
+});

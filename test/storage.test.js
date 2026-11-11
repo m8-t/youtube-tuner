@@ -512,3 +512,231 @@ test('overrides round-trip every supported field', async () => {
   await saveOverrides(overrides);
   assert.deepEqual(await loadOverrides(), new Map(Object.entries(overrides)));
 });
+
+const blocklistStore = await import('../src/storage/blocklist.js');
+const hiddenStore = await import('../src/storage/hidden.js');
+const feedbackStore = await import('../src/storage/feedback.js');
+const statsStore = await import('../src/storage/block-stats.js');
+const subsStore = await import('../src/storage/subs.js');
+const DAY = 24 * 60 * 60 * 1000;
+
+test('BLOCKS: a block records its handle and time', async () => {
+  await blocklistStore.addBlocked('News', { handle: '@News', now: 1000 });
+
+  assert.deepEqual([...await blocklistStore.loadBlocklist()], ['News']);
+  assert.deepEqual((await blocklistStore.loadBlockMeta()).get('News'), {
+    handles: ['@news'],
+    until: null,
+    addedAt: 1000,
+  });
+});
+
+test('BLOCKS: blocking a namesake adds a second handle to the same name', async () => {
+  await blocklistStore.addBlocked('News', { handle: '@news-one', now: 1 });
+  await blocklistStore.addBlocked('News', { handle: '@news-two', now: 2 });
+
+  assert.deepEqual([...await blocklistStore.loadBlocklist()], ['News']);
+  assert.deepEqual(
+    (await blocklistStore.loadBlockMeta()).get('News').handles,
+    ['@news-one', '@news-two'],
+  );
+});
+
+test('BLOCKS: a snooze sets an end and blocking again makes it permanent', async () => {
+  await blocklistStore.addBlocked('Loud', { now: 1000 });
+  assert.equal(
+    await blocklistStore.snoozeBlocked('Loud', { days: 30, now: 1000 }),
+    true,
+  );
+  assert.equal(
+    (await blocklistStore.loadBlockMeta()).get('Loud').until,
+    1000 + 30 * DAY,
+  );
+
+  await blocklistStore.addBlocked('Loud', { now: 2000 });
+  assert.equal((await blocklistStore.loadBlockMeta()).get('Loud').until, null);
+  assert.equal(await blocklistStore.snoozeBlocked('Never Blocked'), false);
+});
+
+test('BLOCKS: expired snoozes are pruned, permanent blocks stay', async () => {
+  await blocklistStore.addBlocked('Permanent', { now: 1 });
+  await blocklistStore.addBlocked('Snoozed', { now: 1 });
+  await blocklistStore.snoozeBlocked('Snoozed', { days: 1, now: 1 });
+
+  assert.deepEqual(await blocklistStore.pruneExpiredBlocks(DAY), []);
+  assert.deepEqual(await blocklistStore.pruneExpiredBlocks(2 * DAY), ['Snoozed']);
+  assert.deepEqual([...await blocklistStore.loadBlocklist()], ['Permanent']);
+  assert.equal((await blocklistStore.loadBlockMeta()).has('Snoozed'), false);
+});
+
+test('BLOCKS: a legacy name-only block is pinned to the first handle seen', async () => {
+  await chrome.storage.local.set({ blocklist: ['Legacy'] });
+
+  assert.equal(await blocklistStore.pinBlockHandle('Legacy', '@first'), true);
+  assert.equal(await blocklistStore.pinBlockHandle('Legacy', '@second'), false);
+  assert.equal(await blocklistStore.pinBlockHandle('Unknown', '@x'), false);
+  assert.equal(await blocklistStore.pinBlockHandle('Legacy', 'not a handle'), false);
+  assert.deepEqual(
+    (await blocklistStore.loadBlockMeta()).get('Legacy').handles,
+    ['@first'],
+  );
+});
+
+test('BLOCKS: unblocking removes the metadata too', async () => {
+  await blocklistStore.addBlocked('Gone', { handle: '@gone', now: 1 });
+  await blocklistStore.removeBlocked('Gone');
+
+  assert.deepEqual(mock.areas.local.blocklist, []);
+  assert.deepEqual(mock.areas.local.blockMeta, {});
+});
+
+test('HIDDEN: videos are added, removed, capped and cleared', async () => {
+  await hiddenStore.addHidden('video000001');
+  await hiddenStore.addHidden('video000002');
+  await hiddenStore.addHidden('video000001');
+  assert.deepEqual(mock.areas.local.hiddenVideos, ['video000002', 'video000001']);
+
+  await hiddenStore.removeHidden('video000002');
+  assert.deepEqual([...await hiddenStore.loadHidden()], ['video000001']);
+
+  await chrome.storage.local.set({
+    hiddenVideos: Array.from({ length: hiddenStore.HIDDEN_CAP }, (_, i) => `v-${i}`),
+  });
+  await hiddenStore.addHidden('newest-video');
+  assert.equal(mock.areas.local.hiddenVideos.length, hiddenStore.HIDDEN_CAP);
+  assert.equal(mock.areas.local.hiddenVideos.at(-1), 'newest-video');
+  assert.equal(mock.areas.local.hiddenVideos.includes('v-0'), false);
+
+  await hiddenStore.clearHidden();
+  assert.deepEqual(mock.areas.local.hiddenVideos, []);
+});
+
+test('BUDGET: a reservation is refused once the weekly limit is used', async () => {
+  let id = 0;
+  const reserve = (now) => feedbackStore.reserveFeedback({
+    action: 'notInterested',
+    videoId: 'video000001',
+    channelName: 'Channel',
+    limit: 2,
+    now,
+    createId: () => `id-${id += 1}`,
+  });
+
+  assert.deepEqual(await reserve(1000), { ok: true, id: 'id-1', used: 1, limit: 2 });
+  assert.deepEqual(await reserve(2000), { ok: true, id: 'id-2', used: 2, limit: 2 });
+  assert.deepEqual(await reserve(3000), {
+    ok: false,
+    reason: 'budget',
+    used: 2,
+    limit: 2,
+  });
+  // A week later the first two no longer count.
+  assert.equal((await reserve(2000 + 7 * DAY + 1)).ok, true);
+});
+
+test('BUDGET: a released reservation gives the slot back', async () => {
+  const first = await feedbackStore.reserveFeedback({
+    action: 'dontRecommendChannel',
+    limit: 1,
+    now: 1000,
+    createId: () => 'only',
+  });
+  assert.equal(first.ok, true);
+  assert.equal(await feedbackStore.releaseFeedback('only'), true);
+  assert.equal(await feedbackStore.releaseFeedback('only'), false);
+  assert.deepEqual(
+    await feedbackStore.feedbackBudget({ limit: 1, now: 1000 }),
+    { used: 0, limit: 1, remaining: 1 },
+  );
+});
+
+test('BUDGET: the limit is capped and unknown actions are refused', async () => {
+  assert.equal(feedbackStore.effectiveWeeklyLimit(9999), feedbackStore.MAX_WEEKLY_LIMIT);
+  assert.equal(feedbackStore.effectiveWeeklyLimit(-1), 0);
+  assert.equal(feedbackStore.effectiveWeeklyLimit('3'), 0);
+  assert.equal((await feedbackStore.reserveFeedback({
+    action: 'watchLater',
+    limit: 5,
+    now: 1,
+  })).ok, false);
+  assert.equal((await feedbackStore.reserveFeedback({
+    action: 'notInterested',
+    limit: 0,
+    now: 1,
+  })).reason, 'budget');
+});
+
+test('STATS: hits count per day and only for blocked channels', async () => {
+  const blocked = new Set(['Spam']);
+  await statsStore.recordBlockHits({ Spam: 3, 'Not Blocked': 9 }, { blocked, now: DAY });
+  await statsStore.recordBlockHits({ Spam: 2 }, { blocked, now: DAY + 5 });
+  await statsStore.recordBlockHits({ Spam: 1 }, { blocked, now: 3 * DAY });
+
+  assert.deepEqual(await statsStore.loadBlockStats(), {
+    Spam: { hits: 6, days: 2, lastSeen: 3 * DAY },
+  });
+});
+
+test('STATS: persistent and unseen blocks are told apart', () => {
+  const now = 400 * DAY;
+  assert.equal(
+    statsStore.isPersistent({ hits: 40, days: 6, lastSeen: now - DAY }, now),
+    true,
+  );
+  assert.equal(
+    statsStore.isPersistent({ hits: 40, days: 2, lastSeen: now - DAY }, now),
+    false,
+  );
+  assert.equal(
+    statsStore.isPersistent({ hits: 40, days: 9, lastSeen: now - 30 * DAY }, now),
+    false,
+  );
+  assert.equal(statsStore.isUnseen(undefined, now - 181 * DAY, now), true);
+  assert.equal(statsStore.isUnseen(undefined, now - 10 * DAY, now), false);
+  assert.equal(
+    statsStore.isUnseen({ hits: 1, days: 1, lastSeen: now - 200 * DAY }, 1, now),
+    true,
+  );
+  assert.equal(statsStore.isUnseen(undefined, 0, now), false);
+});
+
+test('SUBS: handles are stored with the list and follow removals', async () => {
+  await subsStore.saveSubs(['Channel A', 'Channel B'], {
+    'Channel A': '@A-Handle',
+    'Not In List': '@x',
+    'Channel B': 'garbage value',
+  });
+  assert.deepEqual(
+    Object.fromEntries(await subsStore.loadSubHandles()),
+    { 'Channel A': '@a-handle' },
+  );
+
+  assert.equal(
+    await subsStore.addSubNames(['Channel C'], { 'Channel C': '@c' }),
+    true,
+  );
+  // A known name with a newly learned handle is a change too.
+  assert.equal(
+    await subsStore.addSubNames(['Channel B'], { 'Channel B': '@b' }),
+    true,
+  );
+  assert.equal(await subsStore.removeSubNames(['Channel A']), true);
+  assert.deepEqual(
+    Object.fromEntries(await subsStore.loadSubHandles()),
+    { 'Channel B': '@b', 'Channel C': '@c' },
+  );
+});
+
+test('the old native-feedback switch turns the new master switch on once', async () => {
+  const { migrateStorageLayout } = await import('../src/storage/migrate.js');
+  await chrome.storage.local.set({
+    config: { blocklistRule: { enabled: true, sendNativeFeedback: true } },
+  });
+
+  assert.equal(await migrateStorageLayout(), true);
+  assert.deepEqual(mock.areas.local.config.feedback, {
+    enabled: true,
+    weeklyLimit: 3,
+  });
+  assert.equal(await migrateStorageLayout(), false);
+});

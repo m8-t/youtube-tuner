@@ -1,6 +1,7 @@
 import { parseAge } from '../locale/parse-age.js';
 import { parseViews } from '../locale/parse-views.js';
 import { normalizeChannelName } from '../channel-name.js';
+import { blockedAs, isSubscribed } from './identity.js';
 
 const DAY_MS = 86400000;
 const HOUR_MS = 3600000;
@@ -20,12 +21,12 @@ export function decide(tile, config, state) {
   if (!config.enabled) return show('disabled');
 
   const override = channelOverride(state.overrides, tile.channelName);
+  const now = state.now ?? Date.now();
 
-  if (
-    config.blocklistRule.enabled &&
-    tile.channelName &&
-    state.blocklist.has(tile.channelName)
-  ) {
+  // A video the user hid by hand stays hidden wherever it shows up.
+  if (state.hidden?.has(tile.videoId)) return hide('hidden-video');
+
+  if (config.blocklistRule.enabled && blockedAs(tile, state, now) !== null) {
     return hide('blocked');
   }
 
@@ -49,6 +50,10 @@ export function decide(tile, config, state) {
     }
   }
 
+  // Search results are something the user asked for: only explicit blocks
+  // apply there, never the watched, age or view rules.
+  if (state.surface === 'search') return show('search');
+
   if (
     config.watchedRule.enabled &&
     override?.watched?.enabled !== false &&
@@ -62,7 +67,7 @@ export function decide(tile, config, state) {
   let skipReason = null;
   if (state.subs === null) {
     skipReason = 'subs-unavailable';
-  } else if (tile.channelName && state.subs.has(tile.channelName)) {
+  } else if (isSubscribed(tile, state)) {
     skipReason = 'subscribed';
   }
   if (skipReason && !ageForced && !viewForced) return show(skipReason);

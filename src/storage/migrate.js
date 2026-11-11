@@ -19,6 +19,21 @@ export async function migrateStorageLayout({
     await storage.sync.remove(present);
     moved = true;
   }
+
+  // Up to 1.7.x "also send Don't recommend channel" worked on its own. It is
+  // now behind the feedback switch; keep it working for who had it on.
+  const { config } = await storage.local.get('config');
+  if (
+    config !== null
+    && typeof config === 'object'
+    && config.blocklistRule?.sendNativeFeedback === true
+    && config.feedback === undefined
+  ) {
+    await storage.local.set({
+      config: { ...config, feedback: { enabled: true, weeklyLimit: 3 } },
+    });
+    moved = true;
+  }
   return moved;
 }
 

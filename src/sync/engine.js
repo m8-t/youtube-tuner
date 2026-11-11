@@ -7,18 +7,26 @@ import {
   parseHeader,
 } from './crypto.js';
 import {
+  LWW_FIELDS,
   clearWatched,
   createActorId,
   createClock,
   normalizeDocument,
   recordWatched,
+  setBlockMeta,
   setBlocklistEntry,
   setConfigField,
+  setHiddenEntry,
   setManualSub,
   setOverride,
   setSubsEntry,
 } from './document.js';
-import { SUBS_FORMAT_VERSION, normalizeNames } from '../storage/subs.js';
+import {
+  SUBS_FORMAT_VERSION,
+  normalizeNames,
+  normalizeSubHandles,
+} from '../storage/subs.js';
+import { normalizeBlockMeta } from '../storage/blocklist.js';
 import { merge } from './merge.js';
 import { docToStorage, storageToDoc } from './project.js';
 import { ConflictError } from './webdav.js';
@@ -143,7 +151,7 @@ function capabilityError(capabilities) {
 
 function clockCounter(doc, timestamp) {
   let counter = 0;
-  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs']) {
+  for (const field of LWW_FIELDS) {
     for (const entry of Object.values(doc[field] ?? {})) {
       if (
         entry.clock?.actorId === doc.actorId
@@ -186,7 +194,7 @@ function usableSubsEntry(value) {
 
 function maximumClockTimestamp(doc) {
   let maximum = 0;
-  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs']) {
+  for (const field of LWW_FIELDS) {
     for (const entry of Object.values(doc[field] ?? {})) {
       maximum = Math.max(maximum, entry.clock?.ts ?? 0);
     }
@@ -271,6 +279,8 @@ export function createSyncEngine({
       'config',
       'channelOverrides',
       'blocklist',
+      'blockMeta',
+      'hiddenVideos',
       'manualSubs',
       'subs',
       'watched',
@@ -286,6 +296,8 @@ export function createSyncEngine({
         ? overrides
         : {},
       blocklist: storedCollection(local.blocklist),
+      blockMeta: Object.fromEntries(normalizeBlockMeta(local.blockMeta)),
+      hidden: storedCollection(local.hiddenVideos),
       manualSubs: storedCollection(local.manualSubs),
       watched: storedCollection(local.watched),
     };
@@ -332,12 +344,12 @@ export function createSyncEngine({
       actorId ?? createActorId(),
       timestamp,
       state.subs,
+      { blockMeta: state.blockMeta, hidden: state.hidden },
     );
   }
 
   function demoteSnapshotClocks(doc) {
-    const fields = ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs'];
-    for (const field of fields) {
+    for (const field of LWW_FIELDS) {
       for (const entry of Object.values(doc[field])) {
         entry.clock = createClock(0, entry.clock.counter, doc.actorId);
       }
@@ -397,12 +409,24 @@ export function createSyncEngine({
       }
     }
 
+    for (const [name, entry] of Object.entries(snapshot.blockMeta)) {
+      if (!equal(doc.blockMeta[name]?.value, entry.value)) {
+        setBlockMeta(doc, name, entry.value, nextClock());
+      }
+    }
+    for (const [name, entry] of Object.entries(doc.blockMeta)) {
+      if (entry.value !== null && !Object.hasOwn(snapshot.blockMeta, name)) {
+        setBlockMeta(doc, name, null, nextClock());
+      }
+    }
+
     const presenceSetters = {
       blocklist: setBlocklistEntry,
       manualSubs: setManualSub,
       subs: setSubsEntry,
+      hidden: setHiddenEntry,
     };
-    for (const field of ['blocklist', 'manualSubs', 'subs']) {
+    for (const field of ['blocklist', 'manualSubs', 'subs', 'hidden']) {
       if (field === 'subs' && projectedState.subs === null) continue;
       const setter = presenceSetters[field];
       for (const name of Object.keys(snapshot[field])) {
@@ -478,6 +502,12 @@ export function createSyncEngine({
     if (!setsEqual(asSet(current.blocklist), asSet(desired.blocklist))) {
       localWrites.blocklist = desired.blocklist;
     }
+    if (!equal(current.blockMeta, desired.blockMeta)) {
+      localWrites.blockMeta = desired.blockMeta;
+    }
+    if (!setsEqual(asSet(current.hidden), asSet(desired.hidden))) {
+      localWrites.hiddenVideos = desired.hidden;
+    }
     if (!setsEqual(asSet(current.manualSubs), asSet(desired.manualSubs))) {
       localWrites.manualSubs = desired.manualSubs;
     }
@@ -492,9 +522,15 @@ export function createSyncEngine({
         || !setsEqual(normalizeNames(state.subsEntry.ids), asSet(desired.subs))
         || fetchedAt !== localFetchedAt
       ) {
+        // Handles are learned per device and not synced; keep the ones this
+        // device already knows for names that stay in the list.
         localWrites.subs = {
           format: SUBS_FORMAT_VERSION,
           ids: desired.subs,
+          handles: normalizeSubHandles(
+            state.subsEntry?.handles,
+            normalizeNames(desired.subs),
+          ),
           fetchedAt,
         };
       }

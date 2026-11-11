@@ -426,3 +426,181 @@ test('blocklist remains ahead of every channel override', () => {
     hide: true, reason: 'blocked',
   });
 });
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function identityState(overrides = {}) {
+  return {
+    subs: new Set(),
+    blocklist: new Set(),
+    watched: new Set(),
+    locale: 'en',
+    ...overrides,
+  };
+}
+
+const identityTile = (overrides = {}) => ({
+  videoId: 'video000001',
+  title: 'A title',
+  channelName: 'News',
+  channelHandle: null,
+  ageText: '1 day ago',
+  viewText: '1M views',
+  hasResumeBar: false,
+  ...overrides,
+});
+
+test('IDENTITY: a block pinned to a handle does not hide a namesake', () => {
+  const state = identityState({
+    blocklist: new Set(['News']),
+    blockMeta: new Map([['News', { handles: ['@bad-news'], until: null }]]),
+    blockedHandles: new Map([['@bad-news', 'News']]),
+  });
+
+  assert.equal(
+    decide(identityTile({ channelHandle: '@bad-news' }), DEFAULT_CONFIG, state).reason,
+    'blocked',
+  );
+  assert.equal(
+    decide(identityTile({ channelHandle: '@good-news' }), DEFAULT_CONFIG, state).hide,
+    false,
+  );
+});
+
+test('IDENTITY: without a handle on the tile, the name still blocks', () => {
+  const state = identityState({
+    blocklist: new Set(['News']),
+    blockMeta: new Map([['News', { handles: ['@bad-news'], until: null }]]),
+    blockedHandles: new Map([['@bad-news', 'News']]),
+  });
+
+  assert.equal(decide(identityTile(), DEFAULT_CONFIG, state).reason, 'blocked');
+});
+
+test('IDENTITY: a renamed channel stays blocked through its handle', () => {
+  const state = identityState({
+    blocklist: new Set(['Old Name']),
+    blockMeta: new Map([['Old Name', { handles: ['@same'], until: null }]]),
+    blockedHandles: new Map([['@same', 'Old Name']]),
+  });
+
+  assert.equal(decide(
+    identityTile({ channelName: 'New Name', channelHandle: '@same' }),
+    DEFAULT_CONFIG,
+    state,
+  ).reason, 'blocked');
+});
+
+test('IDENTITY: a legacy name-only block hides every tile with that name', () => {
+  const state = identityState({ blocklist: new Set(['News']) });
+
+  assert.equal(
+    decide(identityTile({ channelHandle: '@any' }), DEFAULT_CONFIG, state).reason,
+    'blocked',
+  );
+});
+
+test('SNOOZE: a snoozed block hides until it ends, then shows', () => {
+  const state = (now) => identityState({
+    now,
+    blocklist: new Set(['News']),
+    blockMeta: new Map([['News', { handles: [], until: 10 * DAY_MS }]]),
+  });
+
+  assert.equal(decide(identityTile(), DEFAULT_CONFIG, state(9 * DAY_MS)).reason, 'blocked');
+  assert.equal(decide(identityTile(), DEFAULT_CONFIG, state(10 * DAY_MS)).hide, false);
+});
+
+test('IDENTITY: an impersonator of a subscribed channel gets no exemption', () => {
+  const state = identityState({
+    subs: new Set(['Trusted']),
+    subHandles: new Map([['Trusted', '@trusted']]),
+    subHandleSet: new Set(['@trusted']),
+  });
+  const oldVideo = { channelName: 'Trusted', ageText: '10 years ago' };
+
+  assert.equal(decide(
+    identityTile({ ...oldVideo, channelHandle: '@trusted' }),
+    DEFAULT_CONFIG,
+    state,
+  ).reason, 'subscribed');
+  assert.equal(decide(
+    identityTile({ ...oldVideo, channelHandle: '@impostor' }),
+    DEFAULT_CONFIG,
+    state,
+  ).reason, 'age');
+  // No handle on the tile (sidebar): the name is all there is.
+  assert.equal(
+    decide(identityTile(oldVideo), DEFAULT_CONFIG, state).reason,
+    'subscribed',
+  );
+});
+
+test('IDENTITY: a renamed subscribed channel keeps its exemption', () => {
+  const state = identityState({
+    subs: new Set(['Old Name']),
+    subHandles: new Map([['Old Name', '@same']]),
+    subHandleSet: new Set(['@same']),
+  });
+
+  assert.equal(decide(
+    identityTile({
+      channelName: 'New Name',
+      channelHandle: '@same',
+      ageText: '10 years ago',
+    }),
+    DEFAULT_CONFIG,
+    state,
+  ).reason, 'subscribed');
+});
+
+test('HIDDEN: a hand-hidden video is hidden even from a subscribed channel', () => {
+  const state = identityState({
+    subs: new Set(['News']),
+    hidden: new Set(['video000001']),
+  });
+
+  assert.deepEqual(decide(identityTile(), DEFAULT_CONFIG, state), {
+    hide: true,
+    reason: 'hidden-video',
+  });
+  assert.equal(decide(
+    identityTile(),
+    { ...DEFAULT_CONFIG, enabled: false },
+    state,
+  ).hide, false);
+});
+
+test('SEARCH: only explicit blocks apply to search results', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    titleRule: { enabled: true, patterns: ['spoiler'] },
+  };
+  const state = (extra = {}) => identityState({
+    surface: 'search',
+    watched: new Set(['video000001']),
+    ...extra,
+  });
+  const ancient = { ageText: '12 years ago', viewText: '3 views' };
+
+  // Watched, too old and too few views: all ignored on a search page.
+  assert.deepEqual(decide(identityTile(ancient), config, state()), {
+    hide: false,
+    reason: 'search',
+  });
+  assert.equal(decide(
+    identityTile(ancient),
+    config,
+    state({ blocklist: new Set(['News']) }),
+  ).reason, 'blocked');
+  assert.equal(decide(
+    identityTile(ancient),
+    config,
+    state({ hidden: new Set(['video000001']) }),
+  ).reason, 'hidden-video');
+  assert.equal(decide(
+    identityTile({ ...ancient, title: 'Big SPOILER inside' }),
+    config,
+    state(),
+  ).reason, 'title');
+});

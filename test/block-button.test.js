@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { html } from './helpers/dom.js';
 import {
   attachBlockButtons,
+  armNativeUndo,
   disarmNativeUndo,
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
+  HIDE_VIDEO_BUTTON_CLASS,
   NO_BLOCK_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
   WATCH_LATER_BUTTON_CLASS,
@@ -13,447 +15,283 @@ import {
 } from '../src/dom/block-button.js';
 import { readTile, TILE_SELECTOR } from '../src/dom/tile-adapter.js';
 
-function setup(markup, defaultShouldOffer) {
+function setup(markup, defaults = {}) {
   const doc = html(markup);
-  const blocked = [];
-  const nativeActions = [];
-  const run = ({
-    offerWatchLater = false,
-    dismissAction = 'notInterested',
-    shouldOffer = defaultShouldOffer,
-    sendNativeFeedback,
-    onLocalBlock,
-  } = {}) => {
-    const options = {
-      root: doc.body,
-      tileSelector: TILE_SELECTOR,
-      readTile,
-      onBlock: (name) => blocked.push(name),
-      onNativeAction: (request) => nativeActions.push(request.action),
-      offerWatchLater,
-      dismissAction,
-      doc,
-    };
-    if (shouldOffer !== undefined) options.shouldOffer = shouldOffer;
-    if (sendNativeFeedback !== undefined) {
-      options.sendNativeFeedback = sendNativeFeedback;
-    }
-    if (onLocalBlock !== undefined) options.onLocalBlock = onLocalBlock;
-    attachBlockButtons(options);
-  };
-  return { doc, blocked, nativeActions, run };
+  const calls = { hide: [], block: [], feedback: [], native: [] };
+  const run = (overrides = {}) => attachBlockButtons({
+    root: doc.body,
+    tileSelector: TILE_SELECTOR,
+    readTile,
+    doc,
+    onHideVideo: (tile, element) => calls.hide.push([tile.videoId, element.id]),
+    onBlock: (channelName, tile, element) =>
+      calls.block.push([channelName, tile.videoId, element.id]),
+    onNativeFeedback: (tile, element) =>
+      calls.feedback.push([tile.videoId, element.id]),
+    onNativeAction: (request) =>
+      calls.native.push([request.action, request.tile.id]),
+    ...defaults,
+    ...overrides,
+  });
+  return { doc, calls, run };
 }
 
 // readTile takes the channel from an aria-label, not from a channel href.
 const tile = (id, videoId, channel) => `
   <yt-lockup-view-model id="${id}">
     <a href="/watch?v=${videoId}"></a>
-    <a aria-label="Go to channel ${channel}"></a>
+    ${channel ? `<a aria-label="Go to channel ${channel}"></a>` : ''}
   </yt-lockup-view-model>`;
 
-test('adds a button and host class to a tile that has a channel', () => {
+const one = (doc, className) => doc.querySelector(`.${className}`);
+const count = (doc, className) => doc.querySelectorAll(`.${className}`).length;
+
+test('a tile gets a local hide control and a block control', () => {
   const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
   run();
 
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
+  assert.equal(count(doc, HIDE_VIDEO_BUTTON_CLASS), 1);
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 1);
   assert.ok(doc.querySelector('#a').classList.contains(BLOCK_HOST_CLASS));
 });
 
-test('clicking the button reports the trimmed channel name', () => {
-  const { doc, blocked, run } = setup(tile('a', 'video1', '  Some Channel  '));
-  run();
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
-
-  assert.deepEqual(blocked, ['Some Channel']);
-});
-
-test('block button fires the native action and unconditional local block write', () => {
-  const { doc, blocked, nativeActions, run } =
-    setup(tile('a', 'video1', 'Some Channel'));
-  run({ sendNativeFeedback: true });
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
-
-  assert.deepEqual(nativeActions, ['dontRecommendChannel']);
-  assert.deepEqual(blocked, ['Some Channel']);
-});
-
-test('a rejected block write warns with the channel name and never throws', async (t) => {
-  const doc = html(tile('a', 'video1', 'Some Channel'));
-  const warnings = [];
-  const originalWarn = console.warn;
-  console.warn = (...args) => warnings.push(args);
-  t.after(() => {
-    console.warn = originalWarn;
-  });
-  attachBlockButtons({
-    root: doc.body,
-    tileSelector: TILE_SELECTOR,
-    readTile,
-    onBlock: async () => {
-      throw new Error('storage rejected');
-    },
-    onNativeAction: () => {},
-    doc,
-  });
-
-  assert.doesNotThrow(() => {
-    doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
-  });
-  await Promise.resolve();
-
-  assert.deepEqual(warnings, [[
-    '[youtube-tuner] block failed for "Some Channel" — storage write rejected; if this tab predates an extension update, reload it',
-  ]]);
-});
-
-test('clicking the block button arms its tile with the channel name', () => {
+test('LOCAL FIRST: by default no control that talks to YouTube exists', () => {
   const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
-  run({ sendNativeFeedback: true });
-  const element = doc.querySelector('#a');
+  run();
 
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
-
-  assert.equal(readNativeUndo(element), 'Some Channel');
-  disarmNativeUndo(element);
+  assert.equal(count(doc, NOT_INTERESTED_BUTTON_CLASS), 0);
+  assert.equal(count(doc, WATCH_LATER_BUTTON_CLASS), 0);
 });
 
-test('by default blocking is local only: no native action, no arming, onLocalBlock fires', () => {
-  const localBlocks = [];
-  const armed = [];
-  const doc = html(tile('a', 'video1', 'Some Channel'));
-  const blocked = [];
-  const nativeActions = [];
-  attachBlockButtons({
-    root: doc.body,
-    tileSelector: TILE_SELECTOR,
-    readTile,
-    onBlock: (name) => blocked.push(name),
-    onNativeAction: (request) => nativeActions.push(request.action),
-    onLocalBlock: (name) => localBlocks.push(name),
-    registry: { arm: (...args) => armed.push(args) },
-    doc,
-  });
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
+test('LOCAL FIRST: hide and block report to their handlers and run no native action', () => {
+  const { doc, calls, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run();
 
-  assert.deepEqual(nativeActions, []);
-  assert.deepEqual(blocked, ['Some Channel']);
-  assert.deepEqual(localBlocks, ['Some Channel']);
-  assert.deepEqual(armed, []);
+  one(doc, HIDE_VIDEO_BUTTON_CLASS).click();
+  one(doc, BLOCK_BUTTON_CLASS).click();
+
+  assert.deepEqual(calls.hide, [['video1', 'a']]);
+  assert.deepEqual(calls.block, [['Some Channel', 'video1', 'a']]);
+  assert.deepEqual(calls.native, []);
+  assert.deepEqual(calls.feedback, []);
 });
 
-test('with sendNativeFeedback the native action and arming run and onLocalBlock does not', () => {
-  const localBlocks = [];
-  const armed = [];
-  const doc = html(tile('a', 'video1', 'Some Channel'));
-  const nativeActions = [];
-  attachBlockButtons({
-    root: doc.body,
-    tileSelector: TILE_SELECTOR,
-    readTile,
-    onBlock: () => {},
-    onNativeAction: (request) => nativeActions.push(request.action),
-    onLocalBlock: (name) => localBlocks.push(name),
-    registry: { arm: (...args) => armed.push(args) },
-    sendNativeFeedback: true,
-    doc,
-  });
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
+test('the YouTube-feedback control appears only when offered and reports its tile', () => {
+  const { doc, calls, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run({ offerNativeFeedback: true });
 
-  assert.deepEqual(nativeActions, ['dontRecommendChannel']);
-  assert.equal(armed.length, 1);
-  assert.deepEqual(localBlocks, []);
+  const button = one(doc, NOT_INTERESTED_BUTTON_CLASS);
+  assert.ok(button);
+  assert.match(button.title, /tells YouTube/);
+  assert.match(button.title, /Google account/);
+  button.click();
+  assert.deepEqual(calls.feedback, [['video1', 'a']]);
+
+  run({ offerNativeFeedback: false });
+  assert.equal(count(doc, NOT_INTERESTED_BUTTON_CLASS), 0);
 });
 
-test('a throwing onLocalBlock never escapes the click handler', () => {
-  const { doc, blocked, run } = setup(tile('a', 'video1', 'Some Channel'));
-  run({ onLocalBlock: () => { throw new Error('boom'); } });
+test('controls are labelled for assistive technology and use icons, not emoji', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run({ offerWatchLater: true, offerNativeFeedback: true });
 
-  assert.doesNotThrow(() => {
-    doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
+  for (const className of [
+    HIDE_VIDEO_BUTTON_CLASS,
+    BLOCK_BUTTON_CLASS,
+    WATCH_LATER_BUTTON_CLASS,
+    NOT_INTERESTED_BUTTON_CLASS,
+  ]) {
+    const button = one(doc, className);
+    assert.ok(button.getAttribute('aria-label').length > 0, className);
+    assert.equal(button.getAttribute('aria-label'), button.title);
+    assert.equal(button.textContent, '');
+    assert.equal(button.querySelectorAll('svg path').length, 1);
+    assert.equal(button.querySelector('svg').getAttribute('aria-hidden'), 'true');
+  }
+  assert.equal(one(doc, BLOCK_BUTTON_CLASS).title, 'Block Some Channel');
+});
+
+test('a channel name is only ever used as text', () => {
+  const { doc, run } = setup(
+    tile('a', 'video1', '&lt;img src=x onerror=alert(1)&gt;'),
+  );
+  run();
+
+  assert.equal(doc.querySelectorAll('img').length, 0);
+  assert.equal(
+    one(doc, BLOCK_BUTTON_CLASS).dataset.channelName,
+    '<img src=x onerror=alert(1)>',
+  );
+});
+
+test('a throwing or rejecting handler never escapes the click', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'), {
+    onHideVideo: () => {
+      throw new Error('sync failure');
+    },
+    onBlock: async () => {
+      throw new Error('async failure');
+    },
   });
-  assert.deepEqual(blocked, ['Some Channel']);
+  run();
+
+  assert.doesNotThrow(() => one(doc, HIDE_VIDEO_BUTTON_CLASS).click());
+  assert.doesNotThrow(() => one(doc, BLOCK_BUTTON_CLASS).click());
 });
 
 test('is idempotent across repeated scans', () => {
-  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
+  const { doc, calls, run } = setup(tile('a', 'video1', 'Some Channel'));
   run();
   run();
   run();
 
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
+  assert.equal(count(doc, HIDE_VIDEO_BUTTON_CLASS), 1);
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 1);
+  one(doc, BLOCK_BUTTON_CLASS).click();
+  assert.equal(calls.block.length, 1);
 });
 
-test('adds a watch-later button when it is offered', () => {
-  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
-  run({ offerWatchLater: true });
+test('adds a watch-later control only when it is offered', () => {
+  const { doc, calls, run } = setup(tile('a', 'video1', 'Some Channel'));
+  run();
+  assert.equal(count(doc, WATCH_LATER_BUTTON_CLASS), 0);
 
-  const button = doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`);
-  assert.ok(button);
-  assert.equal(button.type, 'button');
-  assert.equal(button.textContent, '\u{1F552}');
+  run({ offerWatchLater: true });
+  const button = one(doc, WATCH_LATER_BUTTON_CLASS);
   assert.equal(button.title, 'Save to Watch later');
-  assert.equal(button.dataset.videoId, 'video1');
+  button.click();
+
+  assert.deepEqual(calls.native, [['watchLater', 'a']]);
+  assert.deepEqual(calls.block, []);
+  assert.deepEqual(calls.hide, []);
 });
 
-test('does not add a watch-later button when it is not offered', () => {
-  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
-  run({ offerWatchLater: false });
-
-  assert.equal(
-    doc.querySelectorAll(`.${WATCH_LATER_BUTTON_CLASS}`).length,
-    0,
-  );
-});
-
-test('RECYCLING: removes a watch-later button when it is no longer offered', () => {
+test('RECYCLING: removes a watch-later control when it is no longer offered', () => {
   const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
   run({ offerWatchLater: true });
-  assert.ok(doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`));
-
   run({ offerWatchLater: false });
 
-  assert.equal(doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`), null);
+  assert.equal(count(doc, WATCH_LATER_BUTTON_CLASS), 0);
 });
 
-test('watch-later uses only the native action without blocking or arming undo', () => {
-  const doc = html(tile('a', 'video1', 'Some Channel'));
-  const blocked = [];
-  const nativeActions = [];
-  const armed = [];
-  attachBlockButtons({
-    root: doc.body,
-    tileSelector: TILE_SELECTOR,
-    readTile,
-    onBlock: (name) => blocked.push(name),
-    onNativeAction: (request) => nativeActions.push(request.action),
-    offerWatchLater: true,
-    registry: { arm: (...args) => armed.push(args) },
-    doc,
-  });
-
-  doc.querySelector(`.${WATCH_LATER_BUTTON_CLASS}`).click();
-
-  assert.deepEqual(nativeActions, ['watchLater']);
-  assert.deepEqual(blocked, []);
-  assert.deepEqual(armed, []);
-});
-
-test('a recycled tile reports its new channel', () => {
-  const { doc, blocked, run } = setup(tile('a', 'video1', 'First Channel'));
-  run();
-  doc.querySelector('[aria-label^="Go to channel"]')
-    .setAttribute('aria-label', 'Go to channel Second Channel');
-  run();
-  doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
-
-  assert.deepEqual(blocked, ['Second Channel']);
-});
-
-test('does not add a button to a tile without a channel', () => {
-  const { doc, run } = setup(`
-    <yt-lockup-view-model id="a">
-      <a href="/watch?v=video1"></a>
-    </yt-lockup-view-model>`);
+test('RECYCLING: a recycled tile reports its new video and channel', () => {
+  const { doc, calls, run } = setup(tile('a', 'video1', 'Old Channel'));
   run();
 
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
+  doc.querySelector('#a a[href]').setAttribute('href', '/watch?v=video2');
+  doc.querySelector('#a a[aria-label]')
+    .setAttribute('aria-label', 'Go to channel New Channel');
+  run();
+
+  one(doc, HIDE_VIDEO_BUTTON_CLASS).click();
+  one(doc, BLOCK_BUTTON_CLASS).click();
+  assert.deepEqual(calls.hide, [['video2', 'a']]);
+  assert.deepEqual(calls.block, [['New Channel', 'video2', 'a']]);
+  assert.equal(one(doc, BLOCK_BUTTON_CLASS).title, 'Block New Channel');
 });
 
-test('does not add a button when shouldOffer returns false', () => {
-  const { doc, run } = setup(
-    tile('a', 'video1', 'Subscribed Channel'),
-    () => false,
-  );
-  run({ offerWatchLater: true });
+test('a tile without a channel can be hidden but not blocked', () => {
+  const { doc, run } = setup(tile('a', 'video1', null));
+  run();
 
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
-  assert.ok(doc.querySelector('#a').classList.contains(BLOCK_HOST_CLASS));
+  assert.equal(count(doc, HIDE_VIDEO_BUTTON_CLASS), 1);
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 0);
   assert.ok(doc.querySelector('#a').classList.contains(NO_BLOCK_CLASS));
 });
 
-test('RECYCLING: removes an existing button when shouldOffer becomes false', () => {
-  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
-  run();
-  assert.ok(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`));
-
-  run({ shouldOffer: () => false });
-
-  assert.equal(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`), null);
-});
-
-test('subscribed tiles show not-interested but suppress block-channel', () => {
-  const { doc, blocked, nativeActions, run } = setup(
-    tile('a', 'video1', 'Subscribed Channel'),
-    () => false,
-  );
-  run();
-
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
-  const notInterested =
-    doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`);
-  assert.ok(notInterested);
-  notInterested.click();
-  assert.deepEqual(nativeActions, ['notInterested']);
-  assert.deepEqual(blocked, []);
-});
-
-test('thumbs-down dispatches the configured native action', () => {
-  const { doc, nativeActions, run } =
-    setup(tile('a', 'video1', 'Some Channel'));
-  run({ dismissAction: 'hide' });
-
-  doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`).click();
-
-  assert.deepEqual(nativeActions, ['hide']);
-});
-
-test('RECYCLING: thumbs-down reads its re-stamped action at click time', () => {
-  const { doc, nativeActions, run } =
-    setup(tile('a', 'video1', 'Some Channel'));
-  run({ dismissAction: 'notInterested' });
-  const button = doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`);
-  assert.equal(button.dataset.action, 'notInterested');
-  assert.equal(button.title, 'Not interested (tells YouTube, saved in your account)');
-
-  run({ dismissAction: 'hide' });
-
-  assert.equal(
-    doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`),
-    button,
-  );
-  assert.equal(button.dataset.action, 'hide');
-  assert.equal(button.title, 'Hide from subscriptions feed');
-  button.click();
-  assert.deepEqual(nativeActions, ['hide']);
-});
-
-test('adds a button when shouldOffer returns true', () => {
+test('shouldOffer decides the block control and sees the whole tile', () => {
+  const seen = [];
   const { doc, run } = setup(
-    tile('a', 'video1', 'Other Channel'),
-    () => true,
+    tile('a', 'video1', 'Subscribed') + tile('b', 'video2', 'Stranger'),
+    {
+      shouldOffer: (channelName, read) => {
+        seen.push([channelName, read.videoId]);
+        return channelName !== 'Subscribed';
+      },
+    },
   );
-  run({ offerWatchLater: true });
+  run();
 
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
+  assert.deepEqual(seen, [['Subscribed', 'video1'], ['Stranger', 'video2']]);
+  assert.equal(doc.querySelectorAll(`#a .${BLOCK_BUTTON_CLASS}`).length, 0);
+  assert.equal(doc.querySelectorAll(`#b .${BLOCK_BUTTON_CLASS}`).length, 1);
+  // A subscribed channel's video can still be hidden one by one.
+  assert.equal(doc.querySelectorAll(`#a .${HIDE_VIDEO_BUTTON_CLASS}`).length, 1);
+});
+
+test('RECYCLING: the block control follows shouldOffer in both directions', () => {
+  let offer = true;
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'), {
+    shouldOffer: () => offer,
+  });
+  run();
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 1);
   assert.equal(doc.querySelector('#a').classList.contains(NO_BLOCK_CLASS), false);
+
+  offer = false;
+  run();
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 0);
+  assert.equal(doc.querySelector('#a').classList.contains(NO_BLOCK_CLASS), true);
+
+  offer = true;
+  run();
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 1);
 });
 
-test('RECYCLING: updates the no-block class when the offer state flips', () => {
-  let offered = true;
-  const { doc, run } = setup(
-    tile('a', 'video1', 'Some Channel'),
-    () => offered,
-  );
+test('FAIL-OPEN: a throwing shouldOffer still offers the block control', () => {
+  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'), {
+    shouldOffer: () => {
+      throw new Error('broken eligibility check');
+    },
+  });
+  run();
+
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 1);
+});
+
+test('a throwing readTile does not prevent later tiles from getting controls', () => {
+  const doc = html(tile('a', 'video1', 'First') + tile('b', 'video2', 'Second'));
+  attachBlockButtons({
+    root: doc.body,
+    tileSelector: TILE_SELECTOR,
+    doc,
+    readTile: (element) => {
+      if (element.id === 'a') throw new Error('unreadable');
+      return readTile(element);
+    },
+  });
+
+  assert.equal(doc.querySelectorAll(`#a .${HIDE_VIDEO_BUTTON_CLASS}`).length, 0);
+  assert.equal(doc.querySelectorAll(`#b .${HIDE_VIDEO_BUTTON_CLASS}`).length, 1);
+});
+
+test('SCAN COST: tiles handed over by the scan are not read again', () => {
+  const doc = html(tile('a', 'video1', 'Some Channel'));
   const element = doc.querySelector('#a');
-
-  run({ offerWatchLater: true });
-  assert.equal(element.classList.contains(NO_BLOCK_CLASS), false);
-
-  offered = false;
-  run({ offerWatchLater: true });
-  assert.ok(element.classList.contains(NO_BLOCK_CLASS));
-
-  offered = true;
-  run({ offerWatchLater: true });
-  assert.equal(element.classList.contains(NO_BLOCK_CLASS), false);
-});
-
-test('omitting shouldOffer preserves the default button behavior', () => {
-  const { doc, run } = setup(tile('a', 'video1', 'Some Channel'));
-  run();
-
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
-});
-
-test('RECYCLING: removes an existing button when the new channel is rejected', () => {
-  const subscribed = new Set(['Subscribed Channel']);
-  const { doc, run } = setup(
-    tile('a', 'video1', 'Other Channel'),
-    (channelName) => !subscribed.has(channelName),
-  );
-  run();
-
-  doc.querySelector('[aria-label^="Go to channel"]')
-    .setAttribute('aria-label', 'Go to channel Subscribed Channel');
-  run();
-
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
-  assert.ok(doc.querySelector('#a').classList.contains(BLOCK_HOST_CLASS));
-});
-
-test('RECYCLING: adds a button when the new channel is offered', () => {
-  const subscribed = new Set(['Subscribed Channel']);
-  const { doc, run } = setup(
-    tile('a', 'video1', 'Subscribed Channel'),
-    (channelName) => !subscribed.has(channelName),
-  );
-  run();
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
-
-  doc.querySelector('[aria-label^="Go to channel"]')
-    .setAttribute('aria-label', 'Go to channel Other Channel');
-  run();
-
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
-  assert.equal(
-    doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).dataset.channelName,
-    'Other Channel',
-  );
-});
-
-test('null subscription state offers the block button', () => {
-  const subs = null;
-  const { doc, run } = setup(
-    tile('a', 'video1', 'Unknown Subscription Status'),
-    (channelName) => subs === null || !subs.has(channelName.trim()),
-  );
-  run();
-
-  assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
-});
-
-test('a throwing readTile does not prevent later tiles from getting buttons', () => {
-  const doc = html(tile('a', 'video1', 'First Channel') + tile('b', 'video2', 'Second Channel'));
-  const throwingReadTile = (element) => {
-    if (element.id === 'a') throw new Error('unreadable tile');
-    return readTile(element);
-  };
+  let reads = 0;
 
   attachBlockButtons({
     root: doc.body,
     tileSelector: TILE_SELECTOR,
-    readTile: throwingReadTile,
-    onBlock: () => {},
     doc,
+    readTile: () => {
+      reads += 1;
+      return null;
+    },
+    tiles: [{ element, tile: readTile(element) }],
   });
 
-  assert.equal(doc.querySelector('#a').querySelector(`.${BLOCK_BUTTON_CLASS}`), null);
-  assert.ok(doc.querySelector('#b').querySelector(`.${BLOCK_BUTTON_CLASS}`));
+  assert.equal(reads, 0);
+  assert.equal(count(doc, BLOCK_BUTTON_CLASS), 1);
 });
 
-test('toggling sendNativeFeedback applies to existing buttons on the next scan', () => {
-  for (const [first, second] of [[false, true], [true, false]]) {
-    const doc = html(tile('a', 'video1', 'Some Channel'));
-    const nativeActions = [];
-    const armed = [];
-    const localBlocks = [];
-    const attach = (sendNativeFeedback, tag) => attachBlockButtons({
-      root: doc.body,
-      tileSelector: TILE_SELECTOR,
-      readTile,
-      onBlock: () => {},
-      onNativeAction: (request) => nativeActions.push(request.action),
-      onLocalBlock: (name) => localBlocks.push([tag, name]),
-      registry: { arm: (...args) => armed.push(args) },
-      sendNativeFeedback,
-      doc,
-    });
-    attach(first, 'old');
-    attach(second, 'new');
-    doc.querySelector(`.${BLOCK_BUTTON_CLASS}`).click();
+test('the native undo registry arms, reads and disarms a tile', () => {
+  const doc = html(tile('a', 'video1', 'Some Channel'));
+  const element = doc.querySelector('#a');
 
-    assert.equal(nativeActions.length, second ? 1 : 0);
-    assert.equal(armed.length, second ? 1 : 0);
-    assert.deepEqual(localBlocks, second ? [] : [['new', 'Some Channel']]);
-  }
+  assert.equal(armNativeUndo(element, 'Some Channel'), true);
+  assert.equal(readNativeUndo(element), 'Some Channel');
+  assert.equal(disarmNativeUndo(element), true);
+  assert.equal(readNativeUndo(element), undefined);
+  assert.equal(armNativeUndo(null, 'Some Channel'), false);
 });

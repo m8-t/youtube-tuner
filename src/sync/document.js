@@ -1,4 +1,11 @@
-import { normalizeChannelName } from '../channel-name.js';
+import { normalizeChannelKey, normalizeChannelName } from '../channel-name.js';
+
+// Version 2 (extension 2.0) added `blockMeta` and `hidden`. A version 1
+// document is read and upgraded; a 1.x extension refuses a version 2
+// document instead of silently dropping the new fields on its next upload.
+export const DOCUMENT_VERSION = 2;
+const READABLE_VERSIONS = [1, 2];
+const MAX_BLOCK_HANDLES = 8;
 
 export class DocumentError extends Error {
   constructor(message, options) {
@@ -34,7 +41,7 @@ function compareStrings(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function normalizeChannelKey(value) {
+function normalizeChannelNameKey(value) {
   const normalized = normalizeChannelName(value);
   return isSafeKey(normalized) ? normalized : '';
 }
@@ -111,19 +118,32 @@ export const Clock = Object.freeze({
   compare: compareClocks,
 });
 
+// Every field merged entry by entry, newest clock wins.
+export const LWW_FIELDS = Object.freeze([
+  'configFields',
+  'overrides',
+  'blocklist',
+  'blockMeta',
+  'manualSubs',
+  'subs',
+  'hidden',
+]);
+
 export function create(actorId = createActorId()) {
   if (typeof actorId !== 'string' || actorId.length === 0) {
     throw new DocumentError('Invalid actorId');
   }
   return {
-    v: 1,
+    v: DOCUMENT_VERSION,
     actorId,
     configFields: {},
     overrides: {},
     blocklist: {},
+    blockMeta: {},
     manualSubs: {},
     subs: {},
     subsFetchedAt: 0,
+    hidden: {},
     watched: {},
     clearedBefore: 0,
     prunedBefore: 0,
@@ -131,9 +151,44 @@ export function create(actorId = createActorId()) {
 }
 
 function requireDocument(doc) {
-  if (!isObject(doc) || doc.v !== 1) {
+  if (!isObject(doc) || !READABLE_VERSIONS.includes(doc.v)) {
     throw new DocumentError('Invalid sync document');
   }
+}
+
+// What a block carries besides its name: the handles it is pinned to and,
+// for a snooze, when it ends.
+function normalizeBlockMetaValue(value) {
+  if (!isObject(value)) return null;
+  const handles = [];
+  for (const handle of Array.isArray(value.handles) ? value.handles : []) {
+    const key = normalizeChannelKey(handle);
+    if (key && !handles.includes(key)) handles.push(key);
+    if (handles.length >= MAX_BLOCK_HANDLES) break;
+  }
+  return {
+    handles,
+    until: Number.isSafeInteger(value.until) && value.until > 0
+      ? value.until
+      : null,
+    addedAt: Number.isSafeInteger(value.addedAt) && value.addedAt >= 0
+      ? value.addedAt
+      : 0,
+  };
+}
+
+export function setBlockMeta(doc, channelName, value, clock) {
+  requireDocument(doc);
+  const normalizedValue = value === null ? null : normalizeBlockMetaValue(value);
+  if (!isSafeKey(channelName) || (value !== null && !normalizedValue)) {
+    throw new DocumentError('Invalid block metadata');
+  }
+  doc.blockMeta ??= {};
+  doc.blockMeta[channelName] = {
+    value: normalizedValue,
+    clock: requireClock(clock),
+  };
+  return doc;
 }
 
 function requireClock(clock) {
@@ -161,7 +216,7 @@ export function setConfigField(doc, path, value, clock) {
 
 export function setOverride(doc, channelName, value, clock) {
   requireDocument(doc);
-  const name = normalizeChannelKey(channelName);
+  const name = normalizeChannelNameKey(channelName);
   const normalizedValue = value === null ? null : normalizeOverride(value);
   if (!name || (value !== null && !normalizedValue)) {
     throw new DocumentError('Invalid channel override');
@@ -176,9 +231,9 @@ export function setOverride(doc, channelName, value, clock) {
 
 function setPresence(doc, field, name, value, clock) {
   requireDocument(doc);
-  const normalizedName = field === 'blocklist'
+  const normalizedName = field === 'blocklist' || field === 'hidden'
     ? (isSafeKey(name) ? name : '')
-    : normalizeChannelKey(name);
+    : normalizeChannelNameKey(name);
   const present = value === null
     ? false
     : (
@@ -199,6 +254,10 @@ function setPresence(doc, field, name, value, clock) {
 
 export function setBlocklistEntry(doc, pattern, value, clock) {
   return setPresence(doc, 'blocklist', pattern, value, clock);
+}
+
+export function setHiddenEntry(doc, videoId, value, clock) {
+  return setPresence(doc, 'hidden', videoId, value, clock);
 }
 
 export function setManualSub(doc, channelName, value, clock) {
@@ -302,7 +361,9 @@ export function normalizeDocument(value) {
   if (!Number.isSafeInteger(value.v)) {
     throw new DocumentError('Sync document has no valid version');
   }
-  if (value.v !== 1) throw new DocumentError(`Unsupported sync document v${value.v}`);
+  if (!READABLE_VERSIONS.includes(value.v)) {
+    throw new DocumentError(`Unsupported sync document v${value.v}`);
+  }
   if (typeof value.actorId !== 'string' || value.actorId.length === 0) {
     throw new DocumentError('Sync document has no valid actorId');
   }
@@ -320,7 +381,7 @@ export function normalizeDocument(value) {
     if (entry.value === null) return { value: null };
     const normalized = normalizeOverride(entry.value);
     return normalized ? { value: normalized } : undefined;
-  }, normalizeChannelKey);
+  }, normalizeChannelNameKey);
   const normalizePresence = (entry) => (
     typeof entry.present === 'boolean' ? { present: entry.present } : undefined
   );
@@ -329,15 +390,21 @@ export function normalizeDocument(value) {
     normalizePresence,
     (name) => (isSafeKey(name) ? name : ''),
   );
+  doc.blockMeta = normalizeLwwMap(value.blockMeta, (entry) => {
+    if (entry.value === null) return { value: null };
+    const normalized = normalizeBlockMetaValue(entry.value);
+    return normalized ? { value: normalized } : undefined;
+  });
+  doc.hidden = normalizeLwwMap(value.hidden, normalizePresence);
   doc.manualSubs = normalizeLwwMap(
     value.manualSubs,
     normalizePresence,
-    normalizeChannelKey,
+    normalizeChannelNameKey,
   );
   doc.subs = normalizeLwwMap(
     value.subs,
     normalizePresence,
-    normalizeChannelKey,
+    normalizeChannelNameKey,
   );
   if (Number.isSafeInteger(value.subsFetchedAt) && value.subsFetchedAt >= 0) {
     doc.subsFetchedAt = value.subsFetchedAt;

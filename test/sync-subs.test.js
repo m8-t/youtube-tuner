@@ -123,6 +123,7 @@ test('fresh device gets a usable subs entry projected from the remote document',
   assert.deepEqual(b.storage.values.local.subs, {
     format: SUBS_FORMAT_VERSION,
     ids: ['Alpha', 'Beta'],
+    handles: {},
     fetchedAt: 1234,
   });
   const previous = globalThis.chrome;

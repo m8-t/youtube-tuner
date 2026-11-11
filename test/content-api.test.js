@@ -10,7 +10,7 @@ import { createSerialQueue } from '../src/background/serial.js';
 import { createClient, hydrateState } from '../src/content/client.js';
 import { DEFAULT_CONFIG } from '../src/rules/defaults.js';
 
-function fakeStore() {
+function fakeStore(config = DEFAULT_CONFIG) {
   const calls = [];
   const record = (name, result) => async (...args) => {
     calls.push([name, ...args]);
@@ -22,6 +22,16 @@ function fakeStore() {
     addWatched: record('addWatched'),
     addBlocked: record('addBlocked'),
     removeBlocked: record('removeBlocked'),
+    loadConfig: async () => structuredClone(config),
+    loadBlocklist: async () => new Set(['Blocked']),
+    addHidden: record('addHidden'),
+    removeHidden: record('removeHidden'),
+    snoozeBlocked: record('snoozeBlocked', true),
+    pinBlockHandle: record('pinBlockHandle', true),
+    reserveFeedback: record('reserveFeedback', { ok: true, id: 'r1', used: 1, limit: 3 }),
+    releaseFeedback: record('releaseFeedback', true),
+    setFeedbackQueued: record('setFeedbackQueued'),
+    recordBlockHits: record('recordBlockHits', true),
     addSubNames: record('addSubNames', true),
     removeSubNames: record('removeSubNames', false),
     saveSubs: record('saveSubs'),
@@ -30,8 +40,8 @@ function fakeStore() {
   };
 }
 
-function harness({ now = () => 5000 } = {}) {
-  const store = fakeStore();
+function harness({ now = () => 5000, config = DEFAULT_CONFIG } = {}) {
+  const store = fakeStore(config);
   const handle = createContentApi({
     enqueue: createSerialQueue(),
     store,
@@ -91,9 +101,9 @@ test('writes are validated before they reach storage', async () => {
   await send({ type: 'subs-save', names: ['A', 'A', ' B '] });
   assert.deepEqual(store.calls, [
     ['addWatched', 'abcdefghijk'],
-    ['addBlocked', 'Some Channel'],
+    ['addBlocked', 'Some Channel', { handle: null, now: 5000 }],
     ['removeBlocked', 'Some Channel'],
-    ['saveSubs', ['A', 'B']],
+    ['saveSubs', ['A', 'B'], {}],
   ]);
 });
 
@@ -234,7 +244,7 @@ test('a payload can never override the message type', async () => {
 
   await client.addSubs(new Set(['A']));
 
-  assert.deepEqual(messages, [{ type: 'subs-add', names: ['A'] }]);
+  assert.deepEqual(messages, [{ type: 'subs-add', names: ['A'], handles: {} }]);
 });
 
 test('a state snapshot hydrates into lookup structures', () => {
@@ -270,4 +280,100 @@ test('a missing or malformed snapshot fails open', () => {
   assert.equal(state.subsStale, true);
   assert.equal(state.blocklist.size, 0);
   assert.equal(state.watched.size, 0);
+});
+
+test('SMART BLOCKING: a block carries a validated handle and the background clock', async () => {
+  const { send, store } = harness();
+
+  await send({ type: 'block-add', channelName: 'News', handle: '@Bad-News' });
+  await send({ type: 'block-add', channelName: 'News', handle: 'javascript:1' });
+
+  assert.deepEqual(store.calls, [
+    ['addBlocked', 'News', { handle: '@bad-news', now: 5000 }],
+    ['addBlocked', 'News', { handle: null, now: 5000 }],
+  ]);
+});
+
+test('SMART BLOCKING: the page cannot choose how long a snooze lasts', async () => {
+  const { send, store } = harness();
+
+  await send({ type: 'block-snooze', channelName: 'News', days: 99999, until: 1 });
+
+  assert.deepEqual(store.calls, [['snoozeBlocked', 'News', { now: 5000 }]]);
+});
+
+test('SMART BLOCKING: hide, pin and stats requests are validated', async () => {
+  const { send, store } = harness();
+
+  await send({ type: 'hide-add', videoId: 'bad id' });
+  await send({ type: 'block-pin', channelName: 'News', handle: 'nope' });
+  await send({ type: 'block-stats', hits: { News: -3, '': 4, Other: 'x' } });
+  assert.deepEqual(store.calls, []);
+
+  await send({ type: 'hide-add', videoId: 'video000001' });
+  await send({ type: 'hide-remove', videoId: 'video000001' });
+  await send({ type: 'block-pin', channelName: 'News', handle: '@news' });
+  await send({ type: 'block-stats', hits: { ' News ': 2 } });
+  assert.deepEqual(store.calls.map((call) => call.slice(0, 2)), [
+    ['addHidden', 'video000001'],
+    ['removeHidden', 'video000001'],
+    ['pinBlockHandle', 'News'],
+    ['recordBlockHits', { News: 2 }],
+  ]);
+});
+
+test('BUDGET: no feedback is reserved while the user has not opted in', async () => {
+  const { send, store } = harness();
+
+  assert.deepEqual(await send({
+    type: 'feedback-reserve',
+    action: 'notInterested',
+    videoId: 'video000001',
+  }), { ok: true, result: { ok: false, reason: 'disabled' } });
+  assert.deepEqual(store.calls, []);
+});
+
+test('BUDGET: the limit comes from stored settings, not from the message', async () => {
+  const { send, store } = harness({
+    config: {
+      ...DEFAULT_CONFIG,
+      feedback: { enabled: true, weeklyLimit: 3 },
+    },
+  });
+
+  const response = await send({
+    type: 'feedback-reserve',
+    action: 'notInterested',
+    videoId: 'video000001',
+    channelName: ' News ',
+    limit: 9999,
+  });
+
+  assert.deepEqual(response.result, { ok: true, id: 'r1', used: 1, limit: 3 });
+  assert.deepEqual(store.calls, [['reserveFeedback', {
+    action: 'notInterested',
+    videoId: 'video000001',
+    channelName: 'News',
+    limit: 3,
+    now: 5000,
+  }]]);
+});
+
+test("BUDGET: \"Don't recommend channel\" needs its own switch as well", async () => {
+  const { send, store } = harness({
+    config: {
+      ...DEFAULT_CONFIG,
+      feedback: { enabled: true, weeklyLimit: 3 },
+    },
+  });
+
+  assert.deepEqual((await send({
+    type: 'feedback-reserve',
+    action: 'dontRecommendChannel',
+  })).result, { ok: false, reason: 'disabled' });
+  assert.deepEqual((await send({
+    type: 'feedback-reserve',
+    action: 'watchLater',
+  })).result, { ok: false, reason: 'unknown-action' });
+  assert.deepEqual(store.calls, []);
 });

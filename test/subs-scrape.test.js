@@ -725,3 +725,28 @@ test('the save gate requires complete true and a non-empty names array', async (
 
   assert.deepEqual(saves, [['Complete Channel']]);
 });
+
+test('IDENTITY: the subscription scrape yields a handle per channel name', async () => {
+  const { extractSubscriptionHandles } = await import('../src/subs-scrape.js');
+  const documentObject = html(`
+    <yt-lockup-view-model>
+      <a href="/@First-Channel"><span class="yt-core-attributed-string">First Channel</span></a>
+    </yt-lockup-view-model>
+    <yt-lockup-view-model>
+      <a href="/channel/UCabcdefghijklmnopqrstuv"><span class="yt-core-attributed-string">Id Channel</span></a>
+    </yt-lockup-view-model>
+    <ytd-channel-renderer>
+      <a id="main-link" href="/@legacy"><span id="channel-title">Legacy Channel</span></a>
+    </ytd-channel-renderer>
+    <ytd-grid-channel-renderer>
+      <span id="channel-title">No Link Channel</span>
+    </ytd-grid-channel-renderer>
+  `);
+
+  assert.deepEqual(extractSubscriptionHandles(documentObject), {
+    'First Channel': '@first-channel',
+    'Id Channel': 'UCabcdefghijklmnopqrstuv',
+    'Legacy Channel': '@legacy',
+  });
+  assert.deepEqual(extractSubscriptionHandles(null), {});
+});

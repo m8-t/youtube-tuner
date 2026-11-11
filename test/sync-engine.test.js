@@ -1578,3 +1578,145 @@ test('private sync state goes to the injected store, not chrome.storage', async 
     SETTINGS.password,
   );
 });
+
+test('SYNC V2: block metadata and hidden videos travel between two devices', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const remote = { blob: null, revision: null, writes: 0 };
+  const backend = {
+    async read({ ifNoneMatch } = {}) {
+      if (remote.blob === null) return null;
+      if (ifNoneMatch && ifNoneMatch === remote.revision) {
+        return { unchanged: true, revision: remote.revision };
+      }
+      return { blob: remote.blob, revision: remote.revision };
+    },
+    async write(blob) {
+      remote.blob = blob;
+      remote.writes += 1;
+      remote.revision = `"r${remote.writes}"`;
+      return remote.revision;
+    },
+  };
+  // Real edits on two devices are seconds apart, never in the same
+  // millisecond; last-writer-wins needs that to order them.
+  const time = { now: NOW };
+  const device = (local) => {
+    const storage = fakeStorage({
+      settings: { config: copy(DEFAULT_CONFIG), channelOverrides: {} },
+      local: {
+        blocklist: [],
+        manualSubs: [],
+        watched: [],
+        syncSettings: SETTINGS,
+        ...local,
+      },
+    });
+    return {
+      storage,
+      engine: makeEngine({
+        storage,
+        backend,
+        keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+        now: () => time.now,
+      }),
+    };
+  };
+  const sync = (target) => {
+    time.now += 1000;
+    return target.engine.runSync();
+  };
+
+  const a = device({
+    blocklist: ['News', 'Loud'],
+    blockMeta: {
+      News: { handles: ['@bad-news'], until: null, addedAt: 5 },
+      Loud: { handles: [], until: NOW + 1_000_000, addedAt: 6 },
+    },
+    hiddenVideos: ['video000001', 'video000002'],
+  });
+  const b = device({});
+
+  assert.deepEqual(await sync(a), { ok: true, changed: true });
+  assert.deepEqual(await sync(b), { ok: true, changed: true });
+
+  assert.deepEqual(new Set(b.storage.values.local.blocklist), new Set(['News', 'Loud']));
+  assert.deepEqual(b.storage.values.local.blockMeta, {
+    News: { handles: ['@bad-news'], until: null, addedAt: 5 },
+    Loud: { handles: [], until: NOW + 1_000_000, addedAt: 6 },
+  });
+  assert.deepEqual(
+    b.storage.values.local.hiddenVideos,
+    ['video000001', 'video000002'],
+  );
+
+  // B unblocks one channel and unhides one video; A follows.
+  b.storage.values.local.blocklist = ['News'];
+  b.storage.values.local.blockMeta = {
+    News: { handles: ['@bad-news'], until: null, addedAt: 5 },
+  };
+  b.storage.values.local.hiddenVideos = ['video000002'];
+  await sync(b);
+  await sync(a);
+
+  assert.deepEqual(a.storage.values.local.blocklist, ['News']);
+  assert.deepEqual(Object.keys(a.storage.values.local.blockMeta), ['News']);
+  assert.deepEqual(a.storage.values.local.hiddenVideos, ['video000002']);
+
+  const uploaded = await decrypt(remote.blob, key);
+  assert.equal(uploaded.v, 2);
+  assert.equal(uploaded.hidden.video000001.present, false);
+  assert.equal(uploaded.blockMeta.Loud.value, null);
+});
+
+test('SYNC V2: a document from a newer extension is reported as such', async () => {
+  const salt = new Uint8Array(32);
+  const key = await encryptionKey('passphrase', salt);
+  const storage = fakeStorage({
+    local: { syncSettings: SETTINGS, blocklist: ['Kept'] },
+  });
+  const engine = makeEngine({
+    storage,
+    keyStore: fakeKeyStore({ key, salt, iters: 1000 }),
+    backend: {
+      async read() {
+        return {
+          blob: await encryptFutureDocument(key),
+          revision: '"future"',
+        };
+      },
+      async write() {
+        throw new Error('must not upload over a newer document');
+      },
+    },
+  });
+
+  const result = await engine.runSync();
+
+  assert.match(result.error, /Unsupported sync document v3/);
+  assert.deepEqual(storage.values.local.blocklist, ['Kept']);
+});
+
+// encrypt() only serializes valid documents, so a "version 3" envelope is
+// built by hand with the same header and key.
+async function encryptFutureDocument(key) {
+  const valid = await encrypt(
+    storageToDoc(DEFAULT_CONFIG, {}, [], [], [], 'future-actor', NOW),
+    key,
+  );
+  const headerEnd = valid.length - 12 - 16 - new TextEncoder().encode(
+    JSON.stringify(storageToDoc(DEFAULT_CONFIG, {}, [], [], [], 'future-actor', NOW)),
+  ).length;
+  const header = valid.slice(0, headerEnd);
+  const nonce = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(await globalThis.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: nonce, additionalData: header },
+    key,
+    new TextEncoder().encode('{"v":3,"actorId":"future-actor"}'),
+  ));
+  const blob = new Uint8Array(header.length + nonce.length + ciphertext.length);
+  blob.set(header, 0);
+  blob.set(nonce, header.length);
+  blob.set(ciphertext, header.length + nonce.length);
+  return blob;
+}

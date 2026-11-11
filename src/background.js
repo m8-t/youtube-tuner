@@ -8,6 +8,7 @@ import {
   createContentApi,
   createStateBroadcaster,
   lockStorageToTrustedContexts,
+  runBlockMaintenance,
 } from './background/content-api.js';
 import { createSerialQueue } from './background/serial.js';
 import { createWebdavBackend } from './sync/webdav.js';
@@ -361,8 +362,16 @@ export const MESSAGE_ACCESS = Object.freeze({
   [SUBS_COLLECTION_RESULT_MESSAGE]: 'content',
   'state-get': 'content',
   'watched-add': 'content',
+  'hide-add': 'content',
+  'hide-remove': 'content',
   'block-add': 'content',
   'block-remove': 'content',
+  'block-snooze': 'content',
+  'block-pin': 'content',
+  'block-stats': 'content',
+  'feedback-reserve': 'content',
+  'feedback-release': 'content',
+  'feedback-dequeue': 'content',
   'subs-add': 'content',
   'subs-remove': 'content',
   'subs-attempt-get': 'content',
@@ -423,6 +432,9 @@ export function guardMessages(handler, {
 const subscriptionTabs = createSubscriptionTabCoordinator();
 
 function startSubscriptionRefresh() {
+  void enqueueWrite(() => runBlockMaintenance()).catch((error) => {
+    warnRefreshFailure('block-maintenance-failed', error);
+  });
   return refreshSubscriptionIndicators();
 }
 
@@ -499,6 +511,8 @@ const SYNCED_STORAGE_KEYS = [
   'config',
   'channelOverrides',
   'blocklist',
+  'blockMeta',
+  'hiddenVideos',
   'manualSubs',
   'subs',
   'watched',

@@ -1,4 +1,4 @@
-import { normalizeChannelName } from '../channel-name.js';
+import { normalizeChannelKey, normalizeChannelName } from '../channel-name.js';
 
 const KEY = 'subs';
 const MANUAL_KEY = 'manualSubs';
@@ -13,6 +13,24 @@ export function normalizeNames(names) {
       .map(normalizeChannelName)
       .filter(Boolean),
   );
+}
+
+// name -> "@handle" (or channel ID) for the names in `names`. A handle tells
+// a subscribed channel from another channel that copied its display name.
+export function normalizeSubHandles(handles, names) {
+  const output = {};
+  const allowed = names instanceof Set ? names : normalizeNames(names);
+  const entries = handles instanceof Map
+    ? handles.entries()
+    : handles !== null && typeof handles === 'object' && !Array.isArray(handles)
+      ? Object.entries(handles)
+      : [];
+  for (const [rawName, rawHandle] of entries) {
+    const name = normalizeChannelName(rawName);
+    const handle = normalizeChannelKey(rawHandle);
+    if (name && handle && allowed.has(name)) output[name] = handle;
+  }
+  return output;
 }
 
 async function loadUsableSubsEntry() {
@@ -46,28 +64,47 @@ export async function loadSubsMeta() {
   };
 }
 
-export async function saveSubs(channelNames) {
+export async function loadSubHandles() {
+  const entry = await loadUsableSubsEntry();
+  if (entry === null) return new Map();
+  return new Map(Object.entries(
+    normalizeSubHandles(entry.handles, normalizeNames(entry.ids)),
+  ));
+}
+
+export async function saveSubs(channelNames, handles = {}) {
+  const names = normalizeNames(channelNames);
   await chrome.storage.local.set({
     [KEY]: {
       format: SUBS_FORMAT_VERSION,
-      ids: [...normalizeNames(channelNames)],
+      ids: [...names],
+      handles: normalizeSubHandles(handles, names),
       fetchedAt: Date.now(),
     },
   });
 }
 
-export async function addSubNames(names) {
+export async function addSubNames(names, handles = {}) {
   const entry = await loadUsableSubsEntry();
   if (entry === null) return false;
 
   const storedNames = normalizeNames(entry.ids);
   const combinedNames = new Set([...storedNames, ...normalizeNames(names)]);
-  if (combinedNames.size === storedNames.size) return false;
+  const storedHandles = normalizeSubHandles(entry.handles, storedNames);
+  const combinedHandles = {
+    ...storedHandles,
+    ...normalizeSubHandles(handles, combinedNames),
+  };
+  const handlesChanged = Object.keys(combinedHandles).some(
+    (name) => combinedHandles[name] !== storedHandles[name],
+  );
+  if (combinedNames.size === storedNames.size && !handlesChanged) return false;
 
   await chrome.storage.local.set({
     [KEY]: {
       format: entry.format,
       ids: [...combinedNames],
+      handles: combinedHandles,
       fetchedAt: entry.fetchedAt,
     },
   });
@@ -89,6 +126,7 @@ export async function removeSubNames(names) {
     [KEY]: {
       format: entry.format,
       ids: [...remainingNames],
+      handles: normalizeSubHandles(entry.handles, remainingNames),
       fetchedAt: entry.fetchedAt,
     },
   });

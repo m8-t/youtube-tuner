@@ -805,3 +805,25 @@ test('reconcile is inert off /watch and while disabled', () => {
     assert.deepEqual(logCalls, [], JSON.stringify(options));
   }
 });
+
+test('IDENTITY: a captured subscribe click carries the channel handle', async () => {
+  const doc = captureFixture();
+  const added = [];
+  const capture = createSubscribeCapture({
+    documentObject: doc,
+    getPathname: () => '/watch',
+    getEnabled: () => true,
+    addNames: async (names, handles) => {
+      added.push([names, handles]);
+      return true;
+    },
+    removeNames: async () => true,
+    log: () => {},
+  });
+
+  await capture.handleClick({ target: doc.getElementById('subscribe') });
+
+  assert.deepEqual(added, [
+    [['Channel Name'], { 'Channel Name': '@channelname' }],
+  ]);
+});

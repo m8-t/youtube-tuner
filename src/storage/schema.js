@@ -4,6 +4,10 @@
 import { DEFAULT_CONFIG } from '../rules/defaults.js';
 import { normalizeChannelName } from '../channel-name.js';
 import { normalizeOverrides } from './overrides.js';
+import { normalizeBlockMeta } from './blocklist.js';
+import { normalizeBlockStats } from './block-stats.js';
+import { normalizeLedger } from './feedback.js';
+import { normalizeSubHandles } from './subs.js';
 
 export const MAX_NAME_LENGTH = 200;
 export const MAX_NAMES = 10_000;
@@ -93,11 +97,22 @@ function cleanSubsEntry(value) {
   ) {
     return undefined;
   }
+  const ids = cleanNames(value.ids);
   return {
     format: value.format,
-    ids: cleanNames(value.ids),
+    ids,
+    handles: normalizeSubHandles(value.handles, new Set(ids)),
     fetchedAt: value.fetchedAt,
   };
+}
+
+function cleanBlockMeta(value) {
+  if (!isObject(value)) return undefined;
+  const output = {};
+  for (const [name, entry] of normalizeBlockMeta(value)) {
+    if (cleanName(name) === name) output[name] = entry;
+  }
+  return output;
 }
 
 function cleanUpdateCheck(value) {
@@ -119,8 +134,17 @@ const CLEANERS = {
   ),
   blocklist: (value) => (Array.isArray(value) ? cleanNames(value) : undefined),
   manualSubs: (value) => (Array.isArray(value) ? cleanNames(value) : undefined),
+  blockMeta: cleanBlockMeta,
   watched: (value) => (Array.isArray(value) ? cleanVideoIds(value) : undefined),
+  hiddenVideos: (value) => (
+    Array.isArray(value) ? cleanVideoIds(value) : undefined
+  ),
   subs: cleanSubsEntry,
+  blockStats: (value) => (isObject(value) ? normalizeBlockStats(value) : undefined),
+  feedbackLedger: (value) => (
+    Array.isArray(value) ? normalizeLedger(value) : undefined
+  ),
+  feedbackQueue: (value) => (Array.isArray(value) ? cleanNames(value) : undefined),
   subsRefreshAttemptedAt: (value) => (
     Number.isFinite(value) && value >= 0 ? value : undefined
   ),
@@ -154,6 +178,9 @@ export function cleanStoredData(values) {
 // each one makes the extension send feedback into the Google account.
 export function accountFeedbackFlags(config) {
   const flags = [];
+  if (config?.feedback?.enabled === true) {
+    flags.push('allow sending feedback to YouTube');
+  }
   if (config?.blocklistRule?.sendNativeFeedback === true) {
     flags.push('send YouTube\'s "Don\'t recommend channel" when blocking');
   }

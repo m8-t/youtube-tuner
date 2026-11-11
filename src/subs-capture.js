@@ -1,4 +1,4 @@
-import { normalizeChannelName } from './channel-name.js';
+import { channelKeyFromHref, normalizeChannelName } from './channel-name.js';
 import {
   CHANNEL_LINK_SELECTOR,
   OWNER_SELECTOR,
@@ -29,14 +29,24 @@ export function createSubscribeCapture({
   let pending = null;
   let reconcileToken = 0;
 
+  function handlesFor({ name, handle }) {
+    return handle ? { [name]: handle } : {};
+  }
+
   function readOwnerState(owner, button) {
     const lines = (button.textContent ?? '')
       .split(/\r\n?|\n/)
       .map((line) => line.trim());
-    const channelName = [...owner.querySelectorAll(CHANNEL_LINK_SELECTOR)]
-      .map((anchor) => normalizeChannelName(anchor.textContent))
-      .find(Boolean);
-    return { channelName, lines };
+    const anchor = [...owner.querySelectorAll(CHANNEL_LINK_SELECTOR)]
+      .find((candidate) => normalizeChannelName(candidate.textContent));
+    const channelName = anchor
+      ? normalizeChannelName(anchor.textContent)
+      : undefined;
+    return {
+      channelName,
+      channelHandle: channelKeyFromHref(anchor?.getAttribute('href')),
+      lines,
+    };
   }
 
   function readCurrentOwnerState() {
@@ -64,7 +74,11 @@ export function createSubscribeCapture({
     const subscribed = read.lines.some((line) => SUBSCRIBED_LABELS.has(line));
     const unsubscribed = read.lines.some((line) => SUBSCRIBE_LABELS.has(line));
     if (subscribed && !cached.has(read.channelName)) {
-      return { action: 'add', name: read.channelName };
+      return {
+        action: 'add',
+        name: read.channelName,
+        handle: read.channelHandle ?? null,
+      };
     }
     if (unsubscribed && !subscribed && cached.has(read.channelName)) {
       return { action: 'remove', name: read.channelName };
@@ -103,7 +117,7 @@ export function createSubscribeCapture({
 
         try {
           if (intent.action === 'add') {
-            if (await addNames([intent.name])) {
+            if (await addNames([intent.name], handlesFor(intent))) {
               log(
                 `[youtube-tuner] subs-capture: offdevice-added "${intent.name}"`,
               );
@@ -232,7 +246,10 @@ export function createSubscribeCapture({
     if (!ownerState.lines.some((line) => SUBSCRIBE_LABELS.has(line))) return;
 
     try {
-      if (await addNames([ownerState.channelName])) {
+      if (await addNames([ownerState.channelName], handlesFor({
+        name: ownerState.channelName,
+        handle: ownerState.channelHandle,
+      }))) {
         log(`[youtube-tuner] subs-capture: added "${ownerState.channelName}"`);
       } else {
         log('[youtube-tuner] subs-capture: no-cache');

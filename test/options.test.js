@@ -335,7 +335,7 @@ test('settings export writes every known key in the single-area format', async (
     format: 2,
     exportedAt: '2026-07-28T12:34:56.000Z',
     data: {
-      subs: { format: 2, ids: ['Channel A'], fetchedAt: 123 },
+      subs: { format: 2, ids: ['Channel A'], handles: {}, fetchedAt: 123 },
       watched: ['video-1'],
       config: { ...structuredClone(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {
@@ -389,7 +389,7 @@ test('a format 1 import replaces the covered keys and reports imported counts', 
     format: 1,
     exportedAt: '2026-07-28T12:34:56.000Z',
     local: {
-      subs: { format: 2, ids: subscriptions, fetchedAt: 123 },
+      subs: { format: 2, ids: subscriptions, handles: {}, fetchedAt: 123 },
       blocklist: blocked,
       watched,
     },
@@ -692,7 +692,7 @@ test('a local-only format 1 import leaves settings and channel rules untouched',
   };
   await harness.localStorage.set({ ...kept, manualSubs: ['Stale Manual'] });
   const local = {
-    subs: { format: 2, ids: ['Imported Channel'], fetchedAt: 123 },
+    subs: { format: 2, ids: ['Imported Channel'], handles: {}, fetchedAt: 123 },
     watched: ['video-1'],
   };
 

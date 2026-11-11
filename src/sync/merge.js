@@ -1,8 +1,12 @@
 import {
+  LWW_FIELDS,
   compareClocks,
   create,
   normalizeDocument,
 } from './document.js';
+
+const VALUE_FIELDS = new Set(['overrides', 'blockMeta']);
+const PRESENCE_FIELDS = new Set(['blocklist', 'manualSubs', 'subs', 'hidden']);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FUTURE_TOLERANCE_MS = DAY_MS;
@@ -36,10 +40,9 @@ function compareEntries(left, right) {
 }
 
 function isTombstone(field, entry) {
-  return field === 'overrides'
+  return VALUE_FIELDS.has(field)
     ? entry.value === null
-    : (field === 'blocklist' || field === 'manualSubs' || field === 'subs')
-      && entry.present === false;
+    : PRESENCE_FIELDS.has(field) && entry.present === false;
 }
 
 function eligible(field, entry, now) {
@@ -107,7 +110,7 @@ export function merge(localDoc, remoteDoc, now) {
     .at(-1);
   const merged = create(actorId);
 
-  for (const field of ['configFields', 'overrides', 'blocklist', 'manualSubs', 'subs']) {
+  for (const field of LWW_FIELDS) {
     merged[field] = mergeLww(
       field,
       local[field],

@@ -6,13 +6,42 @@ import { createApplier } from '../dom/applier.js';
 import { injectStyles } from '../dom/styles.js';
 import { collapseEmptySections } from '../dom/empty-sections.js';
 import { attachBlockButtons } from '../dom/block-button.js';
-import { showBlockToast, removeBlockToast } from '../dom/block-toast.js';
+import { removeBlockToast } from '../dom/block-toast.js';
 import { createNativeUndoWatcher } from '../dom/native-undo.js';
+import { isSubscribed } from '../rules/identity.js';
 import { createDomHealthCanary } from './canary.js';
+import { createTileActions } from './actions.js';
+
+const SURFACES = {
+  '/': 'home',
+  '/watch': 'watch',
+  '/feed/subscriptions': 'subscriptions',
+  '/results': 'search',
+};
+
+// The kind of page a path is, or null where the extension does not filter.
+export function surfaceFor(pathname) {
+  return Object.hasOwn(SURFACES, pathname) ? SURFACES[pathname] : null;
+}
 
 export function isSupportedRoute(pathname) {
-  return pathname === '/' || pathname === '/watch' || pathname === '/feed/subscriptions';
+  return surfaceFor(pathname) !== null;
 }
+
+// Requests the lifecycle may make. Each one defaults to doing nothing, so a
+// partial client (tests, a degraded background) cannot break filtering.
+const NO_CLIENT = Object.freeze({
+  block: async () => {},
+  unblock: async () => {},
+  snoozeBlock: async () => {},
+  pinBlock: async () => {},
+  hideVideo: async () => {},
+  unhideVideo: async () => {},
+  reportBlockStats: async () => {},
+  reserveFeedback: async () => ({ ok: false, reason: 'disabled' }),
+  releaseFeedback: async () => {},
+  dequeueFeedback: async () => {},
+});
 
 export function removeContentArtifacts(doc = document) {
   removeBlockToast(doc);
@@ -38,12 +67,14 @@ export function createFilteringLifecycle({
   getState,
   getPathname,
   sendMessage = (message) => chrome.runtime.sendMessage(message),
-  addBlockedChannel = async () => {},
-  removeBlockedChannel = async () => {},
+  client = {},
+  addBlockedChannel = client.block ?? NO_CLIENT.block,
+  removeBlockedChannel = client.unblock ?? NO_CLIENT.unblock,
   nativeUndoWatcher = createNativeUndoWatcher({
     doc: documentObject,
     removeBlockedChannel,
   }),
+  runNative,
 } = {}) {
   const root = documentObject.documentElement;
   let active = false;
@@ -51,6 +82,21 @@ export function createFilteringLifecycle({
   let currentPathname = null;
   let applier;
   const domHealthCanary = createDomHealthCanary();
+  const actions = createTileActions({
+    doc: documentObject,
+    client: {
+      ...NO_CLIENT,
+      ...client,
+      block: addBlockedChannel,
+      unblock: removeBlockedChannel,
+    },
+    getConfig,
+    getState,
+    rescan: () => scan(),
+    hold: (element) => applier.hold(element),
+    release: (element) => applier.release(element),
+    ...(runNative ? { runNative } : {}),
+  });
 
   function sendCounts(counts) {
     try {
@@ -84,44 +130,42 @@ export function createFilteringLifecycle({
     if (counts.changed === false) return;
 
     collapseEmptySections({ root, doc: documentObject });
+    const surface = surfaceFor(getPathname());
     attachBlockButtons({
       root,
       tileSelector: TILE_SELECTOR,
       readTile,
       tiles: counts.tiles,
       doc: documentObject,
-      offerWatchLater: getPathname() === '/watch',
-      dismissAction: getPathname() === '/feed/subscriptions'
-        ? 'hide'
-        : 'notInterested',
-      shouldOffer: getPathname() === '/feed/subscriptions'
+      offerWatchLater: surface === 'watch',
+      // YouTube's menu has "Not interested" on the home feed and the watch
+      // page only, and only users who opted in get the control at all.
+      offerNativeFeedback: getConfig().feedback?.enabled === true
+        && (surface === 'home' || surface === 'watch'),
+      // Everything in the subscriptions feed is a subscribed channel.
+      shouldOffer: surface === 'subscriptions'
         ? () => false
-        : (channelName) => {
-          const { subs } = getState();
-          return subs === null || !subs.has(channelName.trim());
+        : (channelName, tile) => {
+          const state = getState();
+          return state.subs === null
+            || !isSubscribed(tile ?? { channelName }, state);
         },
-      onBlock: async (channelName) => {
-        await addBlockedChannel(channelName);
-        getState().blocklist.add(channelName);
-        scan();
-      },
-      sendNativeFeedback: getConfig().blocklistRule?.sendNativeFeedback === true,
-      onLocalBlock: (channelName) => {
-        showBlockToast({
-          doc: documentObject,
-          channelName,
-          onUndo: async () => {
-            try {
-              await removeBlockedChannel(channelName);
-              getState().blocklist.delete(channelName);
-              scan();
-            } catch {
-              // Undo failures must not surface in the page.
-            }
-          },
-        });
-      },
+      onHideVideo: actions.hideVideo,
+      onBlock: actions.blockChannel,
+      onNativeFeedback: actions.tellYouTube,
     });
+    actions.noteBlockedTiles(counts.tiles);
+    void actions.processQueue(counts.tiles).catch(() => {});
+  }
+
+  // The decision function also needs to know which page it is on, and one
+  // clock per scan keeps snooze expiry consistent across tiles.
+  function decisionState() {
+    return {
+      ...getState(),
+      surface: surfaceFor(getPathname()),
+      now: Date.now(),
+    };
   }
 
   applier = createApplier({
@@ -131,7 +175,7 @@ export function createFilteringLifecycle({
     isOutermostTile,
     tileSelector: TILE_SELECTOR,
     getConfig,
-    getState,
+    getState: decisionState,
     onCounts: reportCounts,
   });
 
@@ -172,6 +216,7 @@ export function createFilteringLifecycle({
   }
 
   function stop() {
+    actions.stop();
     initialized = true;
     active = false;
     domHealthCanary.reset();

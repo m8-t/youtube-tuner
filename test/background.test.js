@@ -663,3 +663,17 @@ test('the content script cannot reach any sync or refresh message', () => {
   assert.equal(guarded({ type: 'not-a-message' }, optionsSender, () => {}), undefined);
   assert.equal(guarded({ type: 'constructor' }, optionsSender, () => {}), undefined);
 });
+
+test('every content API operation is reachable by the content script and by nobody else', async () => {
+  const { createContentApi } = await import('../src/background/content-api.js');
+  const types = createContentApi({ enqueue: (task) => task() }).types;
+
+  assert.ok(types.length >= 15);
+  for (const type of types) {
+    assert.equal(MESSAGE_ACCESS[type], 'content', type);
+  }
+  // And nothing a content script may send can configure sync.
+  for (const [type, kind] of Object.entries(MESSAGE_ACCESS)) {
+    if (type.startsWith('sync-')) assert.equal(kind, 'extension', type);
+  }
+});

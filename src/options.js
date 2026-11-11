@@ -1,5 +1,4 @@
 import { loadConfig, saveConfig } from './storage/config.js';
-import { loadBlocklist, removeBlocked } from './storage/blocklist.js';
 import { loadWatched, clearWatched } from './storage/watched.js';
 import {
   loadSubs,
@@ -17,6 +16,12 @@ import {
   setupOverridesEditor,
 } from './options/overrides-ui.js';
 import { setupSyncControls } from './options/sync-ui.js';
+import {
+  renderBlocklist,
+  renderFeedback,
+  renderHidden,
+  setupBlocksUi,
+} from './options/blocks-ui.js';
 
 export {
   SETTINGS_FORMAT,
@@ -111,6 +116,8 @@ const FIELDS = [
   ['watched-enabled', 'checked', (c) => c.watchedRule.enabled, (c, v) => { c.watchedRule.enabled = v; }],
   ['block-enabled', 'checked', (c) => c.blocklistRule.enabled, (c, v) => { c.blocklistRule.enabled = v; }],
   ['block-native', 'checked', (c) => c.blocklistRule.sendNativeFeedback, (c, v) => { c.blocklistRule.sendNativeFeedback = v; }],
+  ['feedback-enabled', 'checked', (c) => c.feedback.enabled, (c, v) => { c.feedback.enabled = v; }],
+  ['feedback-limit', 'valueAsNumber', (c) => c.feedback.weeklyLimit, (c, v) => { c.feedback.weeklyLimit = Math.max(0, Math.min(20, Math.floor(v))); }],
   ['subs-sync-enabled', 'checked', (c) => c.subsSync.enabled, (c, v) => { c.subsSync.enabled = v; }],
   ['title-enabled', 'checked', (c) => c.titleRule.enabled, (c, v) => { c.titleRule.enabled = v; }],
 ];
@@ -129,28 +136,8 @@ async function persist() {
     set(config, value);
   }
   await saveConfig(config);
-}
-
-async function renderBlocklist() {
-  const list = [...await loadBlocklist()].sort();
-  const ul = el('blocklist');
-  ul.textContent = '';
-  el('blocklist-empty').hidden = list.length > 0;
-
-  for (const channelName of list) {
-    const li = document.createElement('li');
-    const name = document.createElement('span');
-    name.textContent = channelName;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = 'Unblock';
-    button.addEventListener('click', async () => {
-      await removeBlocked(channelName);
-      await renderBlocklist();
-    });
-    li.append(name, button);
-    ul.appendChild(li);
-  }
+  // The feedback switch changes what the block list offers.
+  await Promise.all([renderBlocklist(), renderFeedback()]);
 }
 
 export async function renderStatus(refreshResult = null) {
@@ -226,6 +213,8 @@ async function rerenderImportedSettings() {
   renderTitleFilters();
   await Promise.all([
     renderBlocklist(),
+    renderHidden(),
+    renderFeedback(),
     renderStatus(),
     renderManualSubs(),
     renderOverrides(),
@@ -303,11 +292,14 @@ export async function main() {
   renderTitleFilters();
   await Promise.all([
     renderBlocklist(),
+    renderHidden(),
+    renderFeedback(),
     renderStatus(),
     renderManualSubs(),
     setupOverridesEditor(),
     setupSyncControls(),
   ]);
+  setupBlocksUi();
 
   for (const [id] of FIELDS) el(id).addEventListener('change', persist);
 

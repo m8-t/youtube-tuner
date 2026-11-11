@@ -2,8 +2,9 @@
 import { parseAge } from '../locale/parse-age.js';
 import { parseViews } from '../locale/parse-views.js';
 import { detectLocale } from '../locale/detect.js';
-import { normalizeChannelName } from '../channel-name.js';
+import { channelKeyFromHref, normalizeChannelName } from '../channel-name.js';
 import {
+  CHANNEL_LINK_SELECTOR,
   LEGACY_TITLE_SELECTOR,
   METADATA_ROW_SELECTOR,
   RESUME_SELECTOR,
@@ -21,10 +22,28 @@ const CHANNEL_PATTERNS = [
   /^Zu Kanal\s+[„"'«]?(.+?)[“"'»]?$/i,
 ];
 
+const SHORTS_PATH = /^\/shorts\/([\w-]{5,})/;
+
 function videoIdFromHref(href) {
   if (typeof href !== 'string') return null;
   const match = /[?&]v=([\w-]{5,})/.exec(href);
   return match ? match[1] : null;
+}
+
+function shortIdFromHref(href) {
+  if (typeof href !== 'string') return null;
+  const match = SHORTS_PATH.exec(href);
+  return match ? match[1] : null;
+}
+
+// The channel link of a tile, when the surface renders one. Home and search
+// tiles do; the watch-page sidebar does not (checked against the fixtures).
+function readChannelLink(element) {
+  for (const link of element.querySelectorAll(CHANNEL_LINK_SELECTOR)) {
+    const key = channelKeyFromHref(link.getAttribute('href'));
+    if (key) return { key, text: normalizeChannelName(link.textContent) };
+  }
+  return null;
 }
 
 // A grid tile is ytd-rich-item-renderer wrapping yt-lockup-view-model 1:1.
@@ -40,9 +59,18 @@ export function readTile(element) {
     if (!isOutermostTile(element)) return null;
 
     let videoId = null;
-    for (const link of element.querySelectorAll('a[href]')) {
+    let kind = 'video';
+    const links = element.querySelectorAll('a[href]');
+    for (const link of links) {
       videoId = videoIdFromHref(link.getAttribute('href'));
       if (videoId) break;
+    }
+    if (!videoId) {
+      for (const link of links) {
+        videoId = shortIdFromHref(link.getAttribute('href'));
+        if (videoId) break;
+      }
+      if (videoId) kind = 'short';
     }
     if (!videoId) return null;
 
@@ -117,11 +145,19 @@ export function readTile(element) {
       if (text) channelName = text;
     }
 
+    // Legacy renderers (search results) carry the name only as link text.
+    const channelLink = readChannelLink(element);
+    if (channelName === null && channelLink?.text) {
+      channelName = channelLink.text;
+    }
+
     return {
       videoId,
+      kind,
       title,
       titles,
       channelName,
+      channelHandle: channelLink?.key ?? null,
       ageText,
       viewText,
       hasResumeBar: Boolean(element.querySelector(RESUME_SELECTOR)),

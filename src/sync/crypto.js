@@ -1,4 +1,4 @@
-import { parse, serialize } from './document.js';
+import { DocumentError, parse, serialize } from './document.js';
 
 const VERSION = 1;
 const KDF = 'PBKDF2-SHA256';
@@ -259,6 +259,9 @@ export async function decrypt(blob, key) {
     return parse(new TextDecoder('utf-8', { fatal: true }).decode(plaintext));
   } catch (error) {
     if (error instanceof CryptoError) throw error;
+    // Decrypted fine but written by a newer extension: say so, instead of
+    // blaming the passphrase.
+    if (error instanceof DocumentError) throw error;
     throw new CryptoError('Decryption failed', { cause: error });
   }
 }

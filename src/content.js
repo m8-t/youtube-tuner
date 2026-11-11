@@ -1,6 +1,7 @@
 import { detectLocale } from './locale/detect.js';
 import { createStarvationNudge } from './dom/starvation.js';
 import { createSubscribeCapture } from './subs-capture.js';
+import { extractSubscriptionHandles } from './subs-scrape.js';
 import {
   SUBS_REFRESH_ATTEMPTED_KEY,
   requestPassiveSubscriptionCollection,
@@ -45,7 +46,13 @@ let config = DEFAULT_CONFIG;
 let state = {
   subs: null,
   subsStale: false,
+  subHandles: new Map(),
+  subHandleSet: new Set(),
   blocklist: new Set(),
+  blockMeta: new Map(),
+  blockedHandles: new Map(),
+  hidden: new Set(),
+  feedbackQueue: new Set(),
   watched: new Set(),
   overrides: new Map(),
   locale: null,
@@ -136,8 +143,7 @@ async function main({
     getConfig: () => config,
     getState: () => state,
     getPathname: () => location.pathname,
-    addBlockedChannel: client.block,
-    removeBlockedChannel: client.unblock,
+    client,
   });
 
   // One request brings settings and filter data; later changes are pushed.
@@ -165,16 +171,20 @@ async function main({
       await client.markCollectionAttempt();
     },
   };
+  // The names come from the collection; the handles are read off the same
+  // page at the moment it is complete.
+  const saveCollected = (names) =>
+    client.saveSubs(names, extractSubscriptionHandles(document));
   const collectionOptions = {
     requestCollection: (options) => requestSubscriptionCollection({
       ...options,
       storage: attemptStorage,
-      save: client.saveSubs,
+      save: saveCollected,
     }),
     requestPassive: (options) => requestPassiveSubscriptionCollection({
       ...options,
       storage: attemptStorage,
-      save: client.saveSubs,
+      save: saveCollected,
     }),
   };
 

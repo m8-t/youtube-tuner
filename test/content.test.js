@@ -20,6 +20,7 @@ import { HIDDEN_CLASS } from '../src/dom/applier.js';
 import {
   BLOCK_BUTTON_CLASS,
   BLOCK_HOST_CLASS,
+  HIDE_VIDEO_BUTTON_CLASS,
   NOT_INTERESTED_BUTTON_CLASS,
 } from '../src/dom/block-button.js';
 import { COLLAPSED_SECTION_CLASS } from '../src/dom/empty-sections.js';
@@ -40,16 +41,25 @@ function setupFilteringLifecycle({
   subsStale = false,
   markup = lifecycleTile,
   nativeUndoWatcher,
+  feedback = DEFAULT_CONFIG.feedback,
+  client,
+  runNative,
+  stateOverrides = {},
 } = {}) {
   const doc = html(markup);
   let currentPathname = pathname;
-  let currentConfig = { ...DEFAULT_CONFIG, enabled };
+  let currentConfig = { ...DEFAULT_CONFIG, enabled, feedback };
   const currentState = {
     subs,
     subsStale,
     blocklist: new Set(['Blocked Channel']),
+    blockMeta: new Map(),
+    blockedHandles: new Map(),
+    hidden: new Set(),
+    feedbackQueue: new Set(),
     watched: new Set(),
     locale: 'en',
+    ...stateOverrides,
   };
   const messages = [];
   const lifecycle = createFilteringLifecycle({
@@ -59,14 +69,16 @@ function setupFilteringLifecycle({
     getState: () => currentState,
     getPathname: () => currentPathname,
     sendMessage: async (message) => messages.push(message),
-    addBlockedChannel: async () => {},
+    ...(client ? { client } : { addBlockedChannel: async () => {} }),
     nativeUndoWatcher,
+    runNative,
   });
 
   return {
     doc,
     lifecycle,
     messages,
+    state: currentState,
     setEnabled(next) {
       currentConfig = { ...currentConfig, enabled: next };
     },
@@ -79,6 +91,7 @@ function setupFilteringLifecycle({
 function assertCleanFilteringPage(doc) {
   assert.equal(doc.querySelectorAll(`.${HIDDEN_CLASS}`).length, 0);
   assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 0);
+  assert.equal(doc.querySelectorAll(`.${HIDE_VIDEO_BUTTON_CLASS}`).length, 0);
   assert.equal(
     doc.querySelectorAll(`.${NOT_INTERESTED_BUTTON_CLASS}`).length,
     0,
@@ -135,15 +148,17 @@ function createTimerHarness() {
   };
 }
 
-test('filtering routes are exactly the home feed, watch page, and subscriptions feed', () => {
+test('filtering routes are the home feed, watch page, subscriptions feed and search', () => {
   assert.equal(isSupportedRoute('/'), true);
   assert.equal(isSupportedRoute('/watch'), true);
   assert.equal(isSupportedRoute('/feed/subscriptions'), true);
+  assert.equal(isSupportedRoute('/results'), true);
   for (const pathname of [
-    '/results',
     '/@handle',
     '/playlist',
     '/feed/channels',
+    'constructor',
+    '__proto__',
   ]) {
     assert.equal(isSupportedRoute(pathname), false, pathname);
   }
@@ -225,21 +240,21 @@ test('invalidated runtime lifeline fully tears down filtering', () => {
   assertCleanFilteringPage(doc);
 });
 
-test('navigating from home to results tears down every content artifact', (t) => {
+test('navigating from home to an unfiltered page tears down every content artifact', (t) => {
   const { doc, lifecycle, setPathname } = setupFilteringLifecycle();
   t.after(() => lifecycle.stop());
   lifecycle.sync();
   assert.ok(doc.querySelector(`.${HIDDEN_CLASS}`));
 
-  setPathname('/results');
+  setPathname('/playlist');
   lifecycle.sync();
 
   assertCleanFilteringPage(doc);
 });
 
-test('navigating from results back to home restores filtering', (t) => {
+test('navigating from an unfiltered page back to home restores filtering', (t) => {
   const { doc, lifecycle, setPathname } = setupFilteringLifecycle({
-    pathname: '/results',
+    pathname: '/playlist',
   });
   t.after(() => lifecycle.stop());
   lifecycle.sync();
@@ -263,9 +278,11 @@ test('repeated navigation events on one route do not duplicate artifacts', (t) =
 
   assert.equal(doc.querySelectorAll('#ytt-styles').length, 1);
   assert.equal(doc.querySelectorAll(`.${BLOCK_BUTTON_CLASS}`).length, 1);
+  assert.equal(doc.querySelectorAll(`.${HIDE_VIDEO_BUTTON_CLASS}`).length, 1);
+  // Nobody opted in to YouTube feedback, so that control does not exist.
   assert.equal(
     doc.querySelectorAll(`.${NOT_INTERESTED_BUTTON_CLASS}`).length,
-    1,
+    0,
   );
 });
 
@@ -286,25 +303,30 @@ test('subscriptions feed suppresses block buttons with a cold cache', (t) => {
   assert.ok(doc.querySelector(`.${BLOCK_BUTTON_CLASS}`));
 });
 
-test('thumbs-down action follows the current surface across SPA navigation', (t) => {
+test('the YouTube-feedback control exists only after opt-in and only where YouTube offers it', (t) => {
   const { doc, lifecycle, setPathname } = setupFilteringLifecycle({
     pathname: '/feed/subscriptions',
+    feedback: { enabled: true, weeklyLimit: 3 },
   });
   t.after(() => lifecycle.stop());
+  const count = () =>
+    doc.querySelectorAll(`.${NOT_INTERESTED_BUTTON_CLASS}`).length;
+
   lifecycle.sync();
-  const button = doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`);
-  assert.equal(button.dataset.action, 'hide');
-  assert.equal(button.title, 'Hide from subscriptions feed');
+  assert.equal(count(), 0);
+  assert.equal(doc.querySelectorAll(`.${HIDE_VIDEO_BUTTON_CLASS}`).length, 1);
 
   setPathname('/');
   lifecycle.sync();
+  assert.equal(count(), 1);
 
-  assert.equal(
-    doc.querySelector(`.${NOT_INTERESTED_BUTTON_CLASS}`),
-    button,
-  );
-  assert.equal(button.dataset.action, 'notInterested');
-  assert.equal(button.title, 'Not interested (tells YouTube, saved in your account)');
+  setPathname('/results');
+  lifecycle.sync();
+  assert.equal(count(), 0);
+
+  setPathname('/watch');
+  lifecycle.sync();
+  assert.equal(count(), 1);
 });
 
 test('disabling on a supported route leaves a completely clean page', (t) => {
@@ -406,7 +428,7 @@ test('/feed/channels runs marked and passive collection with filtering closed', 
 
 test('inactive count reports send zero without modifying the DOM', (t) => {
   const { doc, lifecycle, messages } = setupFilteringLifecycle({
-    pathname: '/results',
+    pathname: '/playlist',
   });
   t.after(() => lifecycle.stop());
   lifecycle.sync();

@@ -8,7 +8,11 @@ import { installChromeMock } from './chrome-mock.js';
 const dom = new JSDOM(`<html lang="en"><head></head><body>
   <yt-lockup-view-model id="blocked">
     <a href="/watch?v=video000001"></a>
-    <a aria-label="Go to channel Blocked Channel"></a>
+    <a href="/@blocked" aria-label="Go to channel Blocked Channel"></a>
+  </yt-lockup-view-model>
+  <yt-lockup-view-model id="namesake">
+    <a href="/watch?v=video000003"></a>
+    <a href="/@someone-else" aria-label="Go to channel Blocked Channel"></a>
   </yt-lockup-view-model>
   <yt-lockup-view-model id="other">
     <a href="/watch?v=video000002"></a>
@@ -46,7 +50,12 @@ mock.chrome.tabs.sendMessage = async (_tabId, message) => {
   await deliver(message, { id: mock.chrome.runtime.id });
 };
 
-await mock.chrome.storage.local.set({ blocklist: ['Blocked Channel'] });
+await mock.chrome.storage.local.set({
+  blocklist: ['Blocked Channel'],
+  blockMeta: {
+    'Blocked Channel': { handles: ['@blocked'], until: null, addedAt: 1 },
+  },
+});
 await import('../../src/background.js');
 
 // From here on, count every direct storage call: the content script must
@@ -67,7 +76,11 @@ const hidden = (id) => document.getElementById(id).classList.contains('ytt-hidde
 
 await import('../../src/content.js');
 await wait(150);
-const afterStart = { blocked: hidden('blocked'), other: hidden('other') };
+const afterStart = {
+  blocked: hidden('blocked'),
+  namesake: hidden('namesake'),
+  other: hidden('other'),
+};
 const controls = {
   otherHasBlockButton: document.querySelector('#other .ytt-block') !== null,
   styleInjected: document.getElementById('ytt-styles') !== null,
@@ -88,6 +101,15 @@ const afterUndo = {
   stored: (await mock.chrome.storage.local.get('blocklist')).blocklist,
 };
 
+// Hiding one video is local: it is stored, and nothing asks YouTube.
+document.querySelector('#other .ytt-hide-video').click();
+await wait(300);
+const afterHide = {
+  other: hidden('other'),
+  stored: (await mock.chrome.storage.local.get('hiddenVideos')).hiddenVideos,
+  feedbackControls: document.querySelectorAll('.ytt-not-interested').length,
+};
+
 // A settings change made in the options page reaches the tab as a push.
 await mock.chrome.storage.local.set({ config: { enabled: false } });
 await wait(300);
@@ -101,6 +123,7 @@ console.log(JSON.stringify({
   controls,
   afterBlock,
   afterUndo,
+  afterHide,
   afterDisable,
   contentStorageCalls: storageReads.filter((who) => who === 'content').length,
   sentTypes: [...new Set(sentTypes)].sort(),

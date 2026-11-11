@@ -225,14 +225,12 @@ test('popup includes the exact help and subscribed-exemption copy', () => {
     readFileSync('popup.html', 'utf8'),
   ).window.document;
 
-  assert.equal(
-    documentObject.querySelector('#help-panel p').textContent,
-    "👎 tells YouTube you're not interested (saved in your Google account). " +
-      '🚫 hides all videos from that channel, stored locally only; undo from ' +
-      'the toast or in Options. Videos from channels you ' +
-      'subscribe to are never hidden by the age and view rules — collect ' +
-      'your subscriptions below.',
-  );
+  const help = documentObject.querySelector('#help-panel p').textContent;
+  assert.match(help, /^The eye control hides one video\./);
+  assert.match(help, /YouTube is not told/);
+  assert.match(help, /never hidden by the age and view rules/);
+  // No emoji: the controls are icons with text labels now.
+  assert.doesNotMatch(help, /\p{Extended_Pictographic}/u);
   assert.match(
     documentObject.body.textContent,
     /Age and view rules skip subscribed channels\./,

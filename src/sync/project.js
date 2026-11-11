@@ -4,7 +4,9 @@ import {
   createClock,
   normalizeDocument,
   recordWatched,
+  setBlockMeta,
   setBlocklistEntry,
+  setHiddenEntry,
   setConfigField,
   setManualSub,
   setOverride,
@@ -69,6 +71,22 @@ export function docToStorage(value) {
   const blocklist = Object.entries(doc.blocklist)
     .filter(([, entry]) => entry.present)
     .map(([name]) => name);
+  // Metadata only means something for a name that is still blocked.
+  const blockMeta = {};
+  for (const [name, entry] of Object.entries(doc.blockMeta)) {
+    if (entry.value !== null && doc.blocklist[name]?.present === true) {
+      blockMeta[name] = structuredClone(entry.value);
+    }
+  }
+  // Oldest first, like the stored list, so its cap drops the oldest.
+  const hidden = Object.entries(doc.hidden)
+    .filter(([, entry]) => entry.present)
+    .sort(([leftId, left], [rightId, right]) => (
+      left.clock.ts - right.clock.ts
+      || left.clock.counter - right.clock.counter
+      || compareStrings(leftId, rightId)
+    ))
+    .map(([id]) => id);
   const manualSubs = Object.entries(doc.manualSubs)
     .filter(([, entry]) => entry.present)
     .map(([name]) => name);
@@ -89,9 +107,11 @@ export function docToStorage(value) {
     configOverlay,
     channelOverrides,
     blocklist,
+    blockMeta,
     manualSubs,
     subs,
     subsFetchedAt: doc.subsFetchedAt,
+    hidden,
     watched,
   };
 }
@@ -105,6 +125,7 @@ export function storageToDoc(
   actorId,
   now,
   subs = null,
+  { blockMeta = {}, hidden = [] } = {},
 ) {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new TypeError('now must be a non-negative integer timestamp');
@@ -136,6 +157,22 @@ export function storageToDoc(
       } catch {
         // Malformed stored entries are discarded.
       }
+    }
+  }
+  for (const [name, value] of entries(blockMeta)) {
+    if (!Object.hasOwn(doc.blocklist, name)) continue;
+    try {
+      setBlockMeta(doc, name, value, nextClock());
+    } catch {
+      // Malformed stored entries are discarded.
+    }
+  }
+  for (const id of iterable(hidden)) {
+    if (typeof id !== 'string' || id.length === 0) continue;
+    try {
+      setHiddenEntry(doc, id, true, nextClock());
+    } catch {
+      // Malformed stored entries are discarded.
     }
   }
   for (const name of iterable(manualSubs)) {
