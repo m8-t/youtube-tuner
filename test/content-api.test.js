@@ -377,3 +377,24 @@ test("BUDGET: \"Don't recommend channel\" needs its own switch as well", async (
   })).result, { ok: false, reason: 'unknown-action' });
   assert.deepEqual(store.calls, []);
 });
+
+test('no request is answered before the storage migration has finished', async () => {
+  const store = fakeStore();
+  let finishMigration;
+  const ready = new Promise((resolve) => { finishMigration = resolve; });
+  const handle = createContentApi({
+    enqueue: createSerialQueue(),
+    store,
+    ready,
+  });
+
+  let response;
+  handle({ type: 'state-get' }, {}, (value) => { response = value; });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(response, undefined);
+  assert.deepEqual(store.calls, []);
+
+  finishMigration();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(response, { ok: true, result: { blocklist: ['Blocked'] } });
+});

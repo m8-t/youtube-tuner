@@ -9,13 +9,18 @@ browser.
 🧹 **What it hides** in the home feed and the watch-page sidebar:
 
 - Videos from channels on your local blocklist
+- Videos that you hid one by one
 - Videos that you opened before
 - Videos that are older than your age limit
 - Videos with too few views after a grace period
 
 🛡️ **What it protects:** the age rule and the view rule do not apply to your
-subscribed channels. Only the blocklist rule and the watched rule apply to
-all channels.
+subscribed channels. Only the blocklist rule, the hidden videos, the title
+rule, and the watched rule apply to all channels.
+
+**Local first:** a block or a hidden video stays in the extension. YouTube
+is not told. Feedback to YouTube is a separate option. It is off by default
+and has a weekly limit.
 
 🔒 **Private by design:** no analytics, no accounts, no third-party code in
 the bundle. The only external call is one optional request per day to
@@ -153,6 +158,9 @@ complete. If collection fails, it keeps the last good full list.
 
 ### Filter order
 
+The extension filters the home feed, the watch-page sidebar, the
+subscriptions feed, and the search results.
+
 The toolbar badge shows the number of hidden videos. An amber badge means that
 the subscription list is absent or stale.
 
@@ -172,14 +180,21 @@ The first applicable rule gives the result.
 | Order | Condition | Result |
 |---|---|---|
 | 1 | Filtering is off. | Show the video. |
-| 2 | The channel is on the local blocklist. | Hide the video. |
-| 3 | The video has a resume bar or is in the watched set. | Hide the video. |
-| 4 | No subscription set is available. | Show the video. |
-| 5 | The channel is in the subscription set. | Show the video. |
-| 6 | The video is younger than the minimum age (off by default). | Hide the video. |
-| 7 | The video is older than the age limit. | Hide the video. |
-| 8 | The video has too few views after the grace period. | Hide the video. |
-| 9 | No rule above applies. | Show the video. |
+| 2 | You hid this video. | Hide the video. |
+| 3 | The channel is on the local blocklist. | Hide the video. |
+| 4 | The title contains a blocked phrase. | Hide the video. |
+| 5 | The page is a search result page. | Show the video. |
+| 6 | The video has a resume bar or is in the watched set. | Hide the video. |
+| 7 | No subscription set is available. | Show the video. |
+| 8 | The channel is in the subscription set. | Show the video. |
+| 9 | The video is younger than the minimum age (off by default). | Hide the video. |
+| 10 | The video is older than the age limit. | Hide the video. |
+| 11 | The video has too few views after the grace period. | Hide the video. |
+| 12 | No rule above applies. | Show the video. |
+
+You asked for the videos on a search result page. Thus only your own blocks
+apply there (rules 2 to 4). The watched rule, the age rule, and the view rule
+do not apply.
 
 The default limits are 1095 days, 5000 views, and a 48-hour grace period. The minimum age is 0 hours (off). A minimum age above the grace period makes the grace period have no effect.
 
@@ -198,8 +213,8 @@ your subscribed channels, and it stays active when the subscription list is
 absent. The blocklist has no per-channel override; remove the channel from
 the blocklist instead.
 
-The channel rules use the channel display name, the same key as the
-blocklist. The rules are part of the synchronized settings.
+The channel rules use the channel display name. They do not use the
+channel handle. The rules are part of the synchronized settings.
 
 ### Sync between devices (beta)
 
@@ -207,8 +222,11 @@ The browsers that this extension targets have no Google account sync. The
 extension can synchronize its data through your own WebDAV storage instead.
 Nextcloud, mailbox.org, and most hosting providers offer WebDAV.
 
-The sync transfers the settings, the channel rules, the blocklist, the
-manual subscription entries, and the watched history. The collected
+The sync transfers the settings, the channel rules, the blocklist with its
+channel handles and snooze dates, the hidden videos, the manual subscription
+entries, and the watched history. The sync does not transfer the YouTube
+feedback log, the "tell YouTube next time" marks, and the statistics of the
+blocked channels. These stay on each device. The collected
 subscription list transfers only if you turn on **Sync subscription list**
 in the Sync section. Without it, each device collects that list from YouTube
 itself.
@@ -219,9 +237,14 @@ the lists mix. The switch is a synced setting, so one device is enough. A
 device without its own list then takes the synced list and needs no
 **Refresh now**. A full collection on any device updates the list and its
 age on all devices. After you turn the switch on, select **Refresh now** on
-one device so that all devices start from the same complete list. All
-devices need version 1.7.0 or later: older versions drop the synced list when
-they upload.
+one device so that all devices start from the same complete list. The
+channel handles of the subscription list do not transfer. A device that took
+the synced list identifies the subscribed channels by name until it does its
+own collection.
+
+All devices need version 2.0.0 or later. Version 2.0.0 writes a new sync
+format. An older version cannot read it, stops its sync, and reports an
+error until you update it. No data is lost.
 
 The extension encrypts the data with a passphrase before each upload
 (AES-256-GCM, key from PBKDF2 with 600000 iterations). The storage provider
@@ -270,26 +293,81 @@ never contains the sync credentials or the sync state.
 
 ### Tile controls
 
-Each readable video tile has a **Not interested** control. This control tries
-to select YouTube's **Not interested** menu item.
+Each readable video tile has these controls. They are visible when the pointer
+is on the tile.
 
-A tile also has a **Block channel** control if the channel is not in the known
-subscription set. This control adds the channel to the local blocklist and
-shows a toast with an **Undo** button. By default it sends nothing to YouTube.
-In the options, under Blocked channels, a switch makes it also select
-YouTube's **Don't recommend channel** menu item.
+| Control | Icon | Effect |
+|---|---|---|
+| Hide this video | Eye with a line | Hides this one video. Local only. |
+| Block channel | Circle with a line | Hides all videos of the channel. Local only. Not shown for subscribed channels. |
+| Save to Watch later | Clock | Selects YouTube's **Save to Watch later** menu item. Watch page only. |
+| Not interested | Thumb down | Sends YouTube's **Not interested**. Only if you turned on YouTube feedback. |
 
-The native YouTube actions support exact English and German menu labels. If the
-extension cannot find one exact menu item, it does not select a menu item. The
-local blocklist update does not depend on the native YouTube action.
+After **Hide this video**, a toast shows an **Undo** button. After **Block
+channel**, the toast shows **Undo** and **30 days only**. **30 days only**
+changes the block into a block that ends by itself. The options page lists
+all blocked channels. There you can unblock a channel, limit a block to 30
+days, or make it permanent.
 
-#### YouTube feedback stays in your account
+#### How the extension identifies a channel
+
+Channel names are not unique on YouTube. Thus the extension uses the channel
+handle (`@name`) where a tile shows one. The home feed and the search results
+show it. The watch-page sidebar does not show it. There the extension uses
+the channel name.
+
+- A block from a tile with a handle applies to that handle. A different
+  channel with the same name stays visible.
+- A channel that changes its name stays blocked, because the handle stays
+  the same.
+- A block from an older version has no handle. It applies to the name until
+  the extension sees the name together with a handle. Then the block belongs
+  to that handle. If that is the incorrect channel, unblock it and block the
+  correct one.
+- The subscription list uses the same method. A channel that copies the name
+  of a subscribed channel does not get the exemption from the age rule and
+  the view rule.
+
+#### Blocked channels that come back
+
+The extension counts how often it hides videos of each blocked channel. It
+keeps only the counts, on this device. The options page shows them:
+
+- A channel that YouTube recommends again and again has the note "keeps
+  coming back". Each hidden video uses one position in your feed.
+- A channel that did not show up for 180 days is in a separate list. One
+  button unblocks all these channels.
+
+#### YouTube feedback is optional and has a limit
 
 **Not interested** and **Don't recommend channel** are YouTube feedback. YouTube
 stores them in your Google account. They stay there after you remove the
 extension. With many **Don't recommend channel** entries, the home feed can
-shrink to a few channels. That is why the block control is local-only by
-default.
+shrink to a few channels
+([issue #1](https://github.com/m8-t/youtube-tuner/issues/1)). Thus the
+extension sends no feedback unless you permit it.
+
+The options page has the section **YouTube feedback (optional)**:
+
+- **Allow sending feedback to YouTube** is the main switch. It is off by
+  default. When it is on, the tiles on the home feed and the watch page get
+  the **Not interested** control.
+- **Send at most N signals per week** is the limit. The default is 3. The
+  maximum is 20. When the limit is used up, the extension sends nothing and
+  the toast tells you. The local hide or block always operates.
+- **Also send YouTube's "Don't recommend channel" when blocking** is a second
+  switch. It needs the main switch. Each signal counts against the limit.
+- The section shows a log of all signals that the extension sent: the date,
+  the type, the channel, and the video.
+
+For a blocked channel that keeps coming back, the options page has the button
+**Tell YouTube next time**. The next time a video of this channel is in your
+feed, the extension sends one **Not interested** for it. This also counts
+against the limit. This function is new, and it is not verified on the live
+YouTube page. If YouTube's menu does not open, the extension sends nothing.
+
+The native YouTube actions support exact English and German menu labels. If the
+extension cannot find one exact menu item, it does not select a menu item.
 
 YouTube stores the feedback under the account that is active on YouTube. If you
 use a Brand Account, switch to it first, or the feedback page looks empty. To
@@ -331,9 +409,8 @@ action labels (the menu items and the subscribe button) are not verified.
 
 If a menu label does not match exactly, the extension does not select a menu
 item. If a subscribe-button label does not match exactly, the extension does
-not change the subscription list. The **Block channel** control updates the
-local blocklist independently of the menu label. Its native action is off by
-default.
+not change the subscription list. The **Hide this video** control and the
+**Block channel** control do not use YouTube's menu.
 
 The automated tests use fixtures from live pages: three German pages and one
 English sidebar page. The age and view parsers have test coverage in both
@@ -345,12 +422,14 @@ blocklist rule can still hide the video.
 
 | Data | Storage area |
 |---|---|
-| Filter switches and limits | `sync` |
-| Fetched and manual subscription names | `local` |
-| Blocked channel names | `local` |
+| Filter switches, limits, and blocked title phrases | `local` |
+| Per-channel rule overrides | `local` |
+| Fetched and manual subscription names, channel handles | `local` |
+| Blocked channel names, their handles and snooze dates | `local` |
+| Hidden video IDs | `local` |
 | Watched video IDs | `local` |
-| Subscription cache and collection times | `local` |
-| Per-channel rule overrides | `sync` |
+| Counts for blocked channels | `local` |
+| YouTube feedback log and "tell YouTube next time" marks | `local` |
 | Update check time and newest release tag | `local` |
 | Sync document, sync state, and WebDAV settings | IndexedDB |
 | Sync encryption key (non-extractable) | IndexedDB |
@@ -359,59 +438,84 @@ The page script of YouTube cannot read the IndexedDB of the extension. The
 extension keeps the WebDAV password there for this reason. The options page
 does not show a saved password again.
 
-The watched set contains a maximum of 5000 video IDs. If a new ID exceeds this
-limit, the extension removes the oldest ID.
+The part of the extension that runs in the YouTube page (the content script)
+has no access to the stored data. It gets one copy of the filter data from the
+background worker. For each change, it sends a request, and the background
+worker examines the request before it writes. The content script cannot
+change the settings or the sync configuration. Where the browser supports it,
+the extension also locks `chrome.storage` for content scripts.
 
-Your browser can sync the filter configuration because the extension uses
-`storage.sync`. The extension keeps the channel lists and watched IDs in
-`storage.local`.
+The watched set and the hidden set each contain a maximum of 5000 video IDs.
+If a new ID exceeds this limit, the extension removes the oldest ID.
 
-The settings export contains all data from both storage areas, except the
-sync document, the sync state, and the WebDAV settings. An import replaces
-each storage area that is present in the import file and ignores those sync
-keys.
+Versions before 2.0.0 kept the settings and the channel rules in
+`storage.sync`. Version 2.0.0 moves them to `storage.local` at the first
+start.
+
+The settings export contains all data from `storage.local`. It never
+contains the sync document, the sync state, or the WebDAV settings. An import
+examines each entry of the file and ignores unknown or invalid entries. It
+shows a warning before a file turns on YouTube feedback. Version 2.0.0 can
+import the export files of older versions.
 
 ## Architecture
 
 ```
 src/
-  content.js          wiring, SPA navigation, state refresh
-  background.js       badge, alarms, collect-tab lifecycle
+  content.js          content script entry: state, SPA navigation
+  content/
+    client.js         the only link to the background worker
+    lifecycle.js      start and stop of filtering, per page type
+    actions.js        what the tile controls do, feedback budget flow
+    collection.js     subscription collection on /feed/channels
+    lifeline.js  canary.js
+  background.js       badge, alarms, sync, message routing by sender
+  background/
+    content-api.js    examines and executes content-script requests
+    serial.js         one queue for all data writes
   options.js          settings UI, manual refresh
+  options/            blocked channels, sync, backup, channel rules
   popup.js            toolbar control menu
   update-check.js     daily and manual release check via the GitHub API
   rules/
     decide.js         pure decision function
+    identity.js       blocked and subscribed, by handle or by name
     defaults.js
   dom/
-    tile-adapter.js   all YouTube tile selectors
+    selectors.js      all YouTube selectors
+    tile-adapter.js   reads one tile into plain data
     applier.js        MutationObserver, hide and restore
-    block-button.js   the two tile controls
+    block-button.js   the tile controls
     native-menu.js    operates YouTube's own menu, fail-closed
-    styles.js  empty-sections.js  starvation.js
+    styles.js  empty-sections.js  starvation.js  block-toast.js
   locale/             age and view parsing, EN and DE
-  storage/            config + overrides (sync); blocklist, watched, subs (local)
+  storage/            config, overrides, blocklist, hidden, watched, subs,
+                      feedback budget and log, block statistics, schema
   sync/               cross-device sync: clocked document, LWW merge,
                       AES-GCM envelope, WebDAV backend with CAS probe,
-                      engine with diff capture, IndexedDB key store
+                      engine with diff capture, IndexedDB stores
   subs-refresh.js     subscription collection loop
-  subs-scrape.js      channel-name extraction from the page
+  subs-scrape.js      channel names and handles from the page
   subs-capture.js     subscribe, unsubscribe, and reconcile on /watch
-  channel-name.js     shared name normalization
+  channel-name.js     name and handle normalization
 ```
 
 Design rules:
 
 - Filters fail open. An unreadable tile stays visible. An unparseable age or
   view count only disables the age rule and the view rule.
+- Local first. A block or a hide changes only the data of the extension.
+  Feedback to YouTube needs an explicit option and stays in a weekly limit.
 - Native actions and subscription-list writes fail closed. An unknown
-  element, an unknown label, or a timeout causes no click and no write. The
-  local blocklist write is intentionally independent.
+  element, an unknown label, or a timeout causes no click and no write.
+- The content script is not trusted. It has no storage access and no network
+  code. The background worker examines each request and accepts sync
+  messages only from the pages of the extension.
 - Decisions use the video ID, not the DOM node. YouTube uses DOM nodes again
   for different videos.
-- Channel rules use the channel display name. The tile DOM does not contain a
-  channel ID.
-- All YouTube selectors are in central locations.
+- A channel is identified by its handle where the tile shows one, and by its
+  display name where it does not.
+- All YouTube selectors are in `src/dom/selectors.js`.
 
 ## Develop
 
@@ -426,6 +530,13 @@ Design rules:
 The direct development dependencies are esbuild and jsdom. The package tool
 uses an allowlist of 11 extension files. A test verifies this list so that the
 package does not include source files.
+
+Three tests protect the security properties. One test builds the bundles and
+makes sure that no bundle contains an HTML injection sink and that the
+content script bundle contains no storage, network, or credential code. One
+test runs the real content script against the real background handlers. One
+test makes sure that each content-script request type is permitted for the
+content script only.
 
 The CRX tool reads the RSA private key from `YTT_CRX_KEY`. If this variable is
 not set, it reads `key.pem` from the repository root. The tool stops if the key

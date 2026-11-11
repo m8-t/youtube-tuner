@@ -620,11 +620,18 @@ const handleCountsMessage = createCountsMessageHandler({ domHealthState });
 const handleSyncMessage = createSyncMessageHandler();
 const startSyncPull = () => syncEngine.runSync();
 
+// First in the write queue: every later write, and the sync engine's first
+// capture, waits until settings have moved to their 2.0 location. A sync
+// that ran before the move would upload default settings.
+const layoutReady = enqueueWrite(() => ensureStorageLayout());
+
 const stateBroadcaster = createStateBroadcaster();
-const handleContentMessage = createContentApi({ enqueue: enqueueWrite });
+const handleContentMessage = createContentApi({
+  enqueue: enqueueWrite,
+  ready: layoutReady,
+});
 
 void lockStorageToTrustedContexts();
-void ensureStorageLayout();
 
 chrome.action.setPopup({ popup: POPUP_PATH });
 chrome.alarms.create(SUBS_ALARM, { periodInMinutes: 1440 });

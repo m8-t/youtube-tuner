@@ -3,6 +3,72 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [2.0.0] - 2026-11-11
+
+Blocking is local first, and the part of the extension that runs in the
+YouTube page lost its access to stored data. Update every device that uses
+sync: 2.0.0 writes a new sync format that 1.x refuses to read (it stops
+syncing with an error, nothing is lost).
+
+### Changed
+
+- The first tile control now hides the video locally. It used to send
+  YouTube's "Not interested", which is stored in your Google account.
+  Nothing is sent to YouTube unless you turn on "Allow sending feedback to
+  YouTube" in the options.
+- "Also send YouTube's 'Don't recommend channel' when blocking" now needs
+  that switch too. If you had it on, the switch is turned on for you once.
+- Settings and channel rules moved from `storage.sync` to `storage.local`
+  (no 8 KB limit per item, no write rate limit). The move is automatic.
+- Settings export has a new single-area format. Files from older versions
+  still import.
+- Tile controls are labelled icons instead of emoji.
+
+### Added
+
+- A weekly limit for feedback to YouTube (default 3, at most 20) and a log
+  of every signal sent. When the limit is used up, nothing is sent and the
+  toast says so; the local hide or block still happens.
+- Blocks are tied to the channel handle where a tile shows one (home feed,
+  search). A different channel with the same name is no longer hidden, and
+  a renamed channel stays blocked. Blocks from older versions keep matching
+  by name until they are first seen with a handle. The watch-page sidebar
+  shows no handle, so it still matches by name.
+- The subscription list records handles too, so a channel that copies the
+  name of one you subscribe to no longer skips the age and view rules.
+  Run "Refresh now" once to collect the handles.
+- "30 days only" in the toast after a block, and in the options, turns a
+  block into one that ends by itself.
+- The options show how often each blocked channel was hidden, mark the ones
+  YouTube keeps recommending, and offer to unblock the ones not seen for
+  180 days.
+- "Tell YouTube next time" for a blocked channel: one "Not interested" for
+  its next video, inside the weekly limit. Not yet verified against the
+  live YouTube page; if YouTube's menu does not open, nothing is sent.
+- A "Hidden videos" section with a button to show them again.
+- The blocklist, hidden videos and blocked titles also apply to search
+  results. The watched, age and view rules do not.
+- Shorts tiles can be hidden by hand and by blocked titles.
+- Sync carries block handles, snooze dates and hidden videos.
+
+### Security
+
+- The content script has no `chrome.storage` access any more. It gets one
+  state snapshot from the background worker and sends validated requests;
+  it cannot change settings or sync. Storage is locked to extension pages
+  where the browser supports it.
+- All writes to filter data go through one queue in the background worker.
+  Two tabs, or a tab and a sync pull, can no longer overwrite each other.
+- Tests build the bundles and fail if the content script contains storage,
+  network or credential code, or if any bundle contains an HTML injection
+  sink.
+
+### Fixed
+
+- A scan ran for every DOM change on the page, including the video player's.
+  Scans now run only for changes that touch a video tile, and read only the
+  tiles that changed.
+
 ## [1.7.1] - 2026-11-11
 
 Security release. No change to filtering.

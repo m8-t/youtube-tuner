@@ -157,6 +157,9 @@ export function createContentApi({
   enqueue,
   store = defaultStore,
   now = Date.now,
+  // Resolves once one-time storage migrations are done. Nothing is read
+  // before that, or a tab could briefly see default settings.
+  ready = Promise.resolve(),
 } = {}) {
   if (typeof enqueue !== 'function') {
     throw new TypeError('enqueue must be a function');
@@ -303,7 +306,8 @@ export function createContentApi({
     if (typeof type !== 'string' || !Object.hasOwn(operations, type)) {
       return undefined;
     }
-    void Promise.resolve()
+    void Promise.resolve(ready)
+      .catch(() => {})
       .then(() => operations[type](message))
       .then(
         (result) => sendResponse({ ok: true, result }),
