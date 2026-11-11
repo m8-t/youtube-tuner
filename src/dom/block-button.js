@@ -51,6 +51,19 @@ export const nativeUndoRegistry = Object.freeze({
   disarm: disarmNativeUndo,
 });
 
+function readTiles({ root, tileSelector, readTile }) {
+  const entries = [];
+  for (const element of root.querySelectorAll(tileSelector)) {
+    try {
+      const tile = readTile(element);
+      if (tile) entries.push({ element, tile });
+    } catch {
+      // An unreadable tile gets no controls.
+    }
+  }
+  return entries;
+}
+
 export function attachBlockButtons({
   root,
   tileSelector,
@@ -64,15 +77,15 @@ export function attachBlockButtons({
   registry = nativeUndoRegistry,
   sendNativeFeedback = false,
   onLocalBlock = () => {},
+  // Tiles the scan already read. Without them the tiles are read here.
+  tiles = null,
 }) {
-  for (const element of root.querySelectorAll(tileSelector)) {
-    let tile = null;
-    try {
-      tile = readTile(element);
-    } catch {
-      continue;
-    }
-    if (!tile) continue;
+  const entries = Array.isArray(tiles) ? tiles : readTiles({
+    root,
+    tileSelector,
+    readTile,
+  });
+  for (const { element, tile } of entries) {
 
     let button = element.querySelector(`.${BLOCK_BUTTON_CLASS}`);
     let notInterestedButton =

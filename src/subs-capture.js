@@ -1,18 +1,17 @@
 import { normalizeChannelName } from './channel-name.js';
+import {
+  CHANNEL_LINK_SELECTOR,
+  OWNER_SELECTOR,
+  SUBSCRIBE_BUTTON_SELECTOR,
+} from './dom/selectors.js';
 
-export const SUBSCRIBE_BUTTON_SELECTOR =
-  'ytd-subscribe-button-renderer, yt-subscribe-button-view-model'; // UNVERIFIED
-// Verified live 2026-07-28 ancestor chain:
-// ytd-subscribe-button-renderer -> div#subscribe-button -> div#owner ->
-// div#top-row -> div#above-the-fold -> ytd-watch-metadata.
-export const OWNER_SELECTOR = '#owner';
+export { CHANNEL_LINK_SELECTOR, OWNER_SELECTOR, SUBSCRIBE_BUTTON_SELECTOR };
 export const SUBSCRIBE_LABELS = new Set(['Abonnieren', 'Subscribe']);
 export const SUBSCRIBED_LABELS = new Set(['Abonniert', 'Subscribed']);
 export const UNSUB_PENDING_TTL_MS = 15_000;
 export const RECONCILE_INITIAL_DELAY_MS = 1_500;
 export const RECONCILE_VERIFY_DELAY_MS = 1_000;
 export const RECONCILE_MAX_BUTTON_RETRIES = 5;
-export const CHANNEL_LINK_SELECTOR = 'a[href^="/@"], a[href^="/channel/"]';
 const UNSUB_VERIFY_DELAY_MS = 500;
 
 export function createSubscribeCapture({

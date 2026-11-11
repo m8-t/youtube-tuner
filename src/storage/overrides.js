@@ -55,7 +55,7 @@ export function normalizeOverrides(overrides) {
 
 export async function loadOverrides() {
   try {
-    const got = await chrome.storage.sync.get(KEY);
+    const got = await chrome.storage.local.get(KEY);
     return normalizeOverrides(got[KEY]);
   } catch {
     return new Map();
@@ -63,7 +63,7 @@ export async function loadOverrides() {
 }
 
 export async function saveOverrides(overrides) {
-  await chrome.storage.sync.set({
+  await chrome.storage.local.set({
     [KEY]: Object.fromEntries(normalizeOverrides(overrides)),
   });
 }

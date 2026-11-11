@@ -1,3 +1,5 @@
+import { MENU_ITEM_SELECTOR, MENU_TRIGGER_SELECTOR } from './selectors.js';
+
 export const MENU_STRINGS = {
   notInterested: ['Kein Interesse', 'Not interested'],
   hide: [
@@ -19,10 +21,6 @@ export const MENU_STRINGS = {
 
 export const MENU_CLOAK_CLASS = 'ytt-menu-cloak';
 
-const MENU_TRIGGER_SELECTOR =
-  '.ytLockupMetadataViewModelMenuButton button';
-const MENU_ITEM_SELECTOR =
-  'yt-list-item-view-model.ytListItemViewModelHost[role="menuitem"], yt-list-item-view-model [role="menuitem"]';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_POLL_INTERVAL_MS = 25;
 

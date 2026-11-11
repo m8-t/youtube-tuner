@@ -1,16 +1,18 @@
-// Every YouTube-specific selector in this extension lives in this file.
-// When YouTube ships a redesign, this is the only file that needs changing.
+// Reads one video tile into plain data. Selectors are in selectors.js.
 import { parseAge } from '../locale/parse-age.js';
 import { parseViews } from '../locale/parse-views.js';
+import { detectLocale } from '../locale/detect.js';
+import { normalizeChannelName } from '../channel-name.js';
+import {
+  LEGACY_TITLE_SELECTOR,
+  METADATA_ROW_SELECTOR,
+  RESUME_SELECTOR,
+  TILE_SELECTOR,
+  TITLE_HEADING_SELECTOR,
+  TITLE_SELECTOR,
+} from './selectors.js';
 
-// yt-lockup-view-model is the current tile. The ytd-* entries are legacy
-// wrappers still present on some surfaces; see specs/2026-07-27-dom-findings.md.
-export const TILE_SELECTOR =
-  'yt-lockup-view-model, ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer';
-
-// Verified against test/fixtures/home-de-watched.html on 2026-07-27
-const RESUME_SELECTOR =
-  'yt-thumbnail-overlay-progress-bar-view-model .ytThumbnailOverlayProgressBarHostWatchedProgressBar';
+export { TILE_SELECTOR };
 
 // aria-label forms observed live: "Go to channel AlmondTheArtist",
 // "Zu Kanal „Wissenswert“".
@@ -18,8 +20,6 @@ const CHANNEL_PATTERNS = [
   /^Go to channel\s+(.+)$/i,
   /^Zu Kanal\s+[„"'«]?(.+?)[“"'»]?$/i,
 ];
-
-const METADATA_ROW_SELECTOR = '.ytContentMetadataViewModelMetadataRow';
 
 function videoIdFromHref(href) {
   if (typeof href !== 'string') return null;
@@ -46,12 +46,9 @@ export function readTile(element) {
     }
     if (!videoId) return null;
 
-    const titleElement =
-      element.querySelector('.ytLockupMetadataViewModelTitle');
-    const titleHeading = titleElement?.closest(
-      '.ytLockupMetadataViewModelHeadingReset',
-    );
-    const legacyTitleElement = element.querySelector('#video-title');
+    const titleElement = element.querySelector(TITLE_SELECTOR);
+    const titleHeading = titleElement?.closest(TITLE_HEADING_SELECTOR);
+    const legacyTitleElement = element.querySelector(LEGACY_TITLE_SELECTOR);
     // A 2026-08-21 de-DE capture showed YoutubeAntiTranslate changing visible
     // text but not the heading title attribute, so the two titles can disagree.
     const titles = [...new Set([
@@ -63,11 +60,7 @@ export function readTile(element) {
     ].map((candidate) => candidate?.trim()).filter(Boolean))];
     const title = titles[0] ?? null;
 
-    const locale = element.ownerDocument?.documentElement?.lang
-      ?.toLowerCase()
-      .startsWith('de')
-      ? 'de'
-      : 'en';
+    const locale = detectLocale(element.ownerDocument);
 
     // Aria labels carry the unabbreviated metadata on most lockups. Scan them
     // all and keep the first that parses, rather than trusting a selector path
@@ -87,7 +80,7 @@ export function readTile(element) {
         for (const pattern of CHANNEL_PATTERNS) {
           const match = pattern.exec(label);
           if (match) {
-            channelName = match[1].trim();
+            channelName = normalizeChannelName(match[1]) || null;
             break;
           }
         }
@@ -116,7 +109,11 @@ export function readTile(element) {
     // of "Go to channel X". The name is then only in visible text, where the
     // first metadata row is always the channel.
     if (channelName === null) {
-      const text = element.querySelector(METADATA_ROW_SELECTOR)?.textContent?.trim();
+      // Normalized like every stored name, so a multi-line row still matches
+      // the blocklist and the subscription list.
+      const text = normalizeChannelName(
+        element.querySelector(METADATA_ROW_SELECTOR)?.textContent,
+      );
       if (text) channelName = text;
     }
 

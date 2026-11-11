@@ -37,9 +37,11 @@ function copy(value) {
   return structuredClone(value);
 }
 
-function fakeStorage({ sync = {}, local = {} } = {}) {
-  const values = { sync: copy(sync), local: copy(local) };
-  const writes = { sync: [], local: [] };
+// `settings` holds config and channelOverrides. They live in the same
+// storage area as everything else; the split only keeps the tests readable.
+function fakeStorage({ settings = {}, local = {} } = {}) {
+  const values = { local: { ...copy(settings), ...copy(local) } };
+  const writes = { local: [] };
   const area = (name) => ({
     async get(keys) {
       if (keys === null || keys === undefined) return copy(values[name]);
@@ -60,7 +62,6 @@ function fakeStorage({ sync = {}, local = {} } = {}) {
     },
   });
   return {
-    sync: area('sync'),
     local: area('local'),
     values,
     writes,
@@ -210,7 +211,7 @@ test('key store reload restores encryption metadata on a cloned CryptoKey', asyn
 test('capture diffs maps, sets, overrides, watched appends, and watched clears', async () => {
   let time = NOW;
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {
         'Channel A': { watched: { enabled: true } },
@@ -230,8 +231,8 @@ test('capture diffs maps, sets, overrides, watched appends, and watched clears',
   await engine.bootstrap(null);
 
   time += 10;
-  storage.values.sync.config.viewRule.minViews = 321;
-  storage.values.sync.channelOverrides = {
+  storage.values.local.config.viewRule.minViews = 321;
+  storage.values.local.channelOverrides = {
     'Channel A': { watched: { enabled: false } },
     'Channel B': { age: { enabled: true, maxAgeDays: 7 } },
   };
@@ -256,7 +257,7 @@ test('capture diffs maps, sets, overrides, watched appends, and watched clears',
   assert.equal(doc.watched['new-video'].lastSeen, time);
 
   time += 10;
-  storage.values.sync.channelOverrides = {
+  storage.values.local.channelOverrides = {
     'Channel B': { age: { enabled: true, maxAgeDays: 7 } },
   };
   doc = await engine.captureLocalChanges();
@@ -273,7 +274,7 @@ test('capture ignores oldest-at-cap watched eviction as an explicit delete', asy
   let time = NOW;
   const watched = Array.from({ length: 5000 }, (_, index) => `video-${index}`);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -303,7 +304,7 @@ test('runSync happy path uploads local state and persists success metadata', asy
   const salt = new Uint8Array(32);
   const key = await encryptionKey('passphrase', salt);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -363,7 +364,7 @@ test('304 with clean local state only updates sync metadata', async () => {
     NOW - 10,
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -399,7 +400,12 @@ test('304 with clean local state only updates sync metadata', async () => {
 
   assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
   assert.deepEqual(readCalls, [[{ ifNoneMatch: revision }]]);
-  assert.deepEqual(storage.writes.sync, []);
+  assert.deepEqual(
+    storage.writes.local.filter((write) => (
+      'config' in write || 'channelOverrides' in write
+    )),
+    [],
+  );
   assert.deepEqual(storage.writes.local, [{
     syncMeta: {
       revision,
@@ -424,7 +430,7 @@ test('304 uploads newly captured local changes with the stored revision', async 
     NOW - 10,
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {},
     },
@@ -475,7 +481,7 @@ test('304 uploads an already-dirty document without a new capture diff', async (
     NOW - 10,
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -538,7 +544,7 @@ test('304 upload conflict re-reads unconditionally and merges remote changes', a
   );
   const remoteBlob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {},
     },
@@ -620,7 +626,7 @@ test('pull apply followed by an immediate run does not upload', async () => {
     },
   };
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -640,7 +646,7 @@ test('pull apply followed by an immediate run does not upload', async () => {
   });
 
   assert.deepEqual(await engine.runSync(), { ok: true, changed: true });
-  assert.equal(storage.values.sync.config.enabled, false);
+  assert.equal(storage.values.local.config.enabled, false);
   assert.deepEqual(await engine.runSync(), { ok: true, changed: false });
   assert.equal(writes, 0);
 });
@@ -659,7 +665,7 @@ test('runSync retries two conflicts and succeeds on the third write', async () =
   );
   const blob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {},
     },
@@ -710,7 +716,7 @@ test('runSync records an error after exhausting conflict retries', async () => {
   );
   const blob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {},
     },
@@ -785,7 +791,7 @@ test('remote clock watermark persists and ratchets upward', async () => {
     },
   };
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -834,7 +840,7 @@ test('remote clock watermark persists when a later upload fails', async () => {
   );
   const blob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {},
     },
@@ -888,7 +894,7 @@ test('stale remote data is rejected before merge or upload', async () => {
   const blob = await encrypt(staleRemote, key);
   let writes = 0;
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -918,7 +924,7 @@ test('stale remote data is rejected before merge or upload', async () => {
     error: 'remote data is older than previously seen state',
   });
   assert.equal(writes, 0);
-  assert.equal(storage.values.sync.config.enabled, true);
+  assert.equal(storage.values.local.config.enabled, true);
   assert.deepEqual(storage.values.local.blocklist, []);
   assert.equal(storage.values.local.syncMeta.maxRemoteTs, NOW - 10);
   assert.equal(
@@ -941,7 +947,7 @@ test('remote data at the stored clock watermark is accepted', async () => {
   );
   const blob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -985,7 +991,7 @@ test('a first remote pull is trusted without a clock watermark', async () => {
   );
   const blob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -1029,7 +1035,7 @@ test('304 response preserves the remote clock watermark without a write', async 
     NOW - 10,
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -1075,7 +1081,7 @@ test('bootstrap rejects a remote document below its clock watermark', async () =
     NOW - 20,
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -1109,7 +1115,7 @@ test('bootstrap keeps local-only fields while remote config conflicts win', asyn
     NOW - 1,
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: {
         ...copy(DEFAULT_CONFIG),
         enabled: true,
@@ -1132,8 +1138,8 @@ test('bootstrap keeps local-only fields while remote config conflicts win', asyn
   assert.equal(merged.configFields.enabled.clock.ts, NOW - 1);
   assert.equal(merged.configFields.localOnly.value, 'device-2');
   assert.equal(merged.configFields.localOnly.clock.ts, 0);
-  assert.equal(storage.values.sync.config.enabled, false);
-  assert.equal(storage.values.sync.config.localOnly, 'device-2');
+  assert.equal(storage.values.local.config.enabled, false);
+  assert.equal(storage.values.local.config.localOnly, 'device-2');
   assert.equal(storage.values.local.syncMeta.dirty, true);
 });
 
@@ -1154,7 +1160,7 @@ test('bootstrap lets a remote tombstone remove a local blocklist entry', async (
     createClock(NOW - 1, 100, 'remote-actor'),
   );
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -1184,7 +1190,7 @@ test('bootstrap unions watched entries using their real snapshot recency', async
   );
   remote.clearedBefore = NOW - 30;
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -1214,7 +1220,7 @@ test('bootstrap unions watched entries using their real snapshot recency', async
 test('bootstrap creates a document from storage when remote is empty', async () => {
 
   const localStorage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {},
     },
@@ -1247,7 +1253,7 @@ test('enable uploads the conservative union and marks bootstrap dirty', async ()
   );
   const blob = await encrypt(remoteDoc, key);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {
         'Local Channel': { watched: { enabled: false } },
@@ -1327,7 +1333,7 @@ test('fresh-profile enable preserves the remote projection', async () => {
   );
   const blob = await encrypt(remoteDoc, remoteKey);
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: {},
     },
@@ -1359,11 +1365,11 @@ test('fresh-profile enable preserves the remote projection', async () => {
   assert.equal(keys.record.iters, 1000);
   assert.deepEqual(await decrypt(blob, keys.record.key), remoteDoc);
   assert.equal(storage.values.local.syncSettings.enabled, true);
-  assert.deepEqual(storage.values.sync.config, {
+  assert.deepEqual(storage.values.local.config, {
     ...DEFAULT_CONFIG,
     enabled: false,
   });
-  assert.deepEqual(storage.values.sync.channelOverrides, {
+  assert.deepEqual(storage.values.local.channelOverrides, {
     'Remote Channel': { watched: { enabled: false } },
   });
   assert.deepEqual(storage.values.local.blocklist, ['Remote Block']);
@@ -1387,7 +1393,7 @@ test('decrypt error preserves projected user data and records a safe error', asy
   const blob = await encrypt(remoteDoc, rightKey);
   const localConfig = { ...copy(DEFAULT_CONFIG), enabled: true };
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: localConfig,
       channelOverrides: {},
     },
@@ -1422,7 +1428,7 @@ test('decrypt error preserves projected user data and records a safe error', asy
     await engine.runSync(),
     { error: 'wrong passphrase or corrupt data' },
   );
-  assert.equal(storage.values.sync.config.enabled, true);
+  assert.equal(storage.values.local.config.enabled, true);
   assert.deepEqual(storage.values.local.blocklist, ['Local Block']);
   assert.equal(
     storage.values.local.syncMeta.lastError,
@@ -1432,7 +1438,7 @@ test('decrypt error preserves projected user data and records a safe error', asy
 
 test('disable clears sync-private state but preserves user data', async () => {
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: copy(DEFAULT_CONFIG),
       channelOverrides: { Channel: { watched: { enabled: false } } },
     },
@@ -1455,8 +1461,8 @@ test('disable clears sync-private state but preserves user data', async () => {
   assert.deepEqual(storage.values.local.blocklist, ['Blocked']);
   assert.deepEqual(storage.values.local.manualSubs, ['Manual']);
   assert.deepEqual(storage.values.local.watched, ['video']);
-  assert.ok(storage.values.sync.config);
-  assert.ok(storage.values.sync.channelOverrides);
+  assert.ok(storage.values.local.config);
+  assert.ok(storage.values.local.channelOverrides);
   assert.equal(keys.cleared, true);
 });
 

@@ -1,6 +1,6 @@
-export const COLLAPSED_SECTION_CLASS = 'ytt-section-collapsed';
+import { RICH_SECTION_SELECTOR } from './selectors.js';
 
-const RICH_SECTION_SELECTOR = 'ytd-rich-section-renderer';
+export const COLLAPSED_SECTION_CLASS = 'ytt-section-collapsed';
 
 function showSections(sections) {
   for (const section of sections) {

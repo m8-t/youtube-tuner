@@ -63,12 +63,138 @@ test('reports matched tiles and null channel names for each scan', () => {
 
   applier.scan();
 
-  assert.deepEqual(reports, [{
+  assert.equal(reports.length, 1);
+  const { tiles, changed, ...numbers } = reports[0];
+  assert.deepEqual(numbers, {
     hidden: 0,
     visible: 2,
     totalMatchedTiles: 2,
     nullChannelNameTiles: 2,
-  }]);
+  });
+  // The scan hands its reads on, so nothing downstream reads a tile twice.
+  assert.deepEqual(tiles.map(({ tile }) => tile.videoId), ['video1', 'video2']);
+  assert.equal(changed, true);
+});
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 160));
+
+test('SCAN COST: a mutation outside every tile triggers no scan', async () => {
+  const reports = [];
+  let reads = 0;
+  const doc = html(`<div id="player"><span id="time">0:01</span></div>${
+    tileHtml('a', 'video1')}`);
+  const applier = createApplier({
+    root: doc.body,
+    decide: hideIf([]),
+    readTile: (element) => {
+      reads += 1;
+      return readTile(element);
+    },
+    isOutermostTile,
+    tileSelector: TILE_SELECTOR,
+    getConfig: () => DEFAULT_CONFIG,
+    getState: () => ({}),
+    onCounts: (counts) => reports.push(counts),
+  });
+  applier.start();
+  assert.equal(reports.length, 1);
+  assert.equal(reads, 1);
+
+  doc.querySelector('#time').firstChild.data = '0:02';
+  doc.querySelector('#player').appendChild(doc.createElement('p'));
+  await settle();
+
+  assert.equal(reports.length, 1);
+  assert.equal(reads, 1);
+  applier.stop();
+});
+
+test('SCAN COST: an incremental scan reads only the tile that changed', async () => {
+  const readIds = [];
+  const reports = [];
+  const doc = html(tileHtml('a', 'video1') + tileHtml('b', 'video2'));
+  const applier = createApplier({
+    root: doc.body,
+    decide: hideIf(['video9']),
+    readTile: (element) => {
+      readIds.push(element.id);
+      return readTile(element);
+    },
+    isOutermostTile,
+    tileSelector: TILE_SELECTOR,
+    getConfig: () => DEFAULT_CONFIG,
+    getState: () => ({}),
+    onCounts: (counts) => reports.push(counts),
+  });
+  applier.start();
+  assert.deepEqual(readIds, ['a', 'b']);
+
+  // YouTube recycles node b for another video.
+  doc.querySelector('#b a').setAttribute('href', '/watch?v=video9');
+  await settle();
+
+  assert.deepEqual(readIds, ['a', 'b', 'b']);
+  assert.ok(doc.querySelector('#b').classList.contains(HIDDEN_CLASS));
+  assert.deepEqual(applier.getCounts(), { hidden: 1, visible: 1 });
+  assert.equal(reports.at(-1).changed, true);
+  applier.stop();
+});
+
+test('SCAN COST: a text change inside a tile makes it read again', async () => {
+  const readIds = [];
+  const doc = html(`<ytd-rich-item-renderer id="a">
+    <a href="/watch?v=video1"></a><span id="meta">1 view</span>
+  </ytd-rich-item-renderer>`);
+  const applier = createApplier({
+    root: doc.body,
+    decide: hideIf([]),
+    readTile: (element) => {
+      readIds.push(element.id);
+      return readTile(element);
+    },
+    isOutermostTile,
+    tileSelector: TILE_SELECTOR,
+    getConfig: () => DEFAULT_CONFIG,
+    getState: () => ({}),
+    onCounts: () => {},
+  });
+  applier.start();
+
+  doc.querySelector('#meta').firstChild.data = '2 views';
+  await settle();
+
+  assert.deepEqual(readIds, ['a', 'a']);
+  applier.stop();
+});
+
+test('SCAN COST: a newly added tile is read and a full scan reads all', async () => {
+  const readIds = [];
+  const doc = html(`<div id="grid">${tileHtml('a', 'video1')}</div>`);
+  const applier = createApplier({
+    root: doc.body,
+    decide: hideIf([]),
+    readTile: (element) => {
+      readIds.push(element.id);
+      return readTile(element);
+    },
+    isOutermostTile,
+    tileSelector: TILE_SELECTOR,
+    getConfig: () => DEFAULT_CONFIG,
+    getState: () => ({}),
+    onCounts: () => {},
+  });
+  applier.start();
+
+  doc.querySelector('#grid').insertAdjacentElement(
+    'beforeend',
+    html(tileHtml('b', 'video2')).querySelector('#b'),
+  );
+  await settle();
+  assert.deepEqual(readIds, ['a', 'b']);
+
+  applier.scan();
+  assert.deepEqual(readIds, ['a', 'b', 'a', 'b']);
+  applier.stop();
 });
 
 // Regression guard. readTile returns null for a nested tile, and scan()

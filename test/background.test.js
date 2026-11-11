@@ -16,7 +16,6 @@ const {
   ensureSyncPullAlarm,
   createUpdateCheckRunner,
   refreshSubscriptionIndicators,
-  refreshSubs,
   updateCountsBadge,
 } = await import('../src/background.js');
 const {
@@ -26,7 +25,7 @@ const {
 
 beforeEach(async () => {
   await chrome.storage.local.remove(['subs', 'updateCheck']);
-  await chrome.storage.sync.remove('config');
+  await chrome.storage.local.remove('config');
 });
 
 function tabsHarness() {
@@ -151,17 +150,6 @@ test('install and update re-inject content into every open YouTube tab', async (
   ]);
 });
 
-test('fresh subscription cache needs no foreground collection tab', async () => {
-  await chrome.storage.local.set({
-    subs: {
-      format: SUBS_FORMAT_VERSION,
-      ids: ['Channel A', 'Channel B'],
-      fetchedAt: Date.now(),
-    },
-  });
-
-  assert.equal(await refreshSubs(), 2);
-});
 
 test('stale count messages keep the hidden count and use the amber badge', () => {
   const calls = { text: [], color: [] };

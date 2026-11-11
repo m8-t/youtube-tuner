@@ -1,14 +1,12 @@
-import { removeBlocked } from '../storage/blocklist.js';
 import {
   BLOCK_HOST_CLASS,
   nativeUndoRegistry,
 } from './block-button.js';
-
-const NATIVE_UNDO_RENDERER = 'notification-multi-action-renderer';
+import { NATIVE_UNDO_RENDERER } from './selectors.js';
 
 export function createNativeUndoWatcher({
   doc,
-  removeBlockedChannel = removeBlocked,
+  removeBlockedChannel = async () => {},
   registry = nativeUndoRegistry,
 } = {}) {
   let started = false;

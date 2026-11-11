@@ -51,7 +51,7 @@ test('options page includes the channel rules editor', () => {
 
 test('blocked title options load and save patterns and the enabled checkbox', async (t) => {
   const mock = installChromeMock({ install: false });
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: {
       titleRule: {
         enabled: true,
@@ -87,7 +87,7 @@ test('blocked title options load and save patterns and the enabled checkbox', as
     new documentObject.defaultView.Event('submit', { bubbles: true }),
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(mock.areas.sync.config.titleRule.patterns, [
+  assert.deepEqual(mock.areas.local.config.titleRule.patterns, [
     'Spoilers',
     'Recap',
     'Live reaction',
@@ -103,8 +103,8 @@ test('blocked title options load and save patterns and the enabled checkbox', as
     new documentObject.defaultView.Event('change', { bubbles: true }),
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(mock.areas.sync.config.titleRule.enabled, false);
-  assert.deepEqual(mock.areas.sync.config.titleRule.patterns, [
+  assert.equal(mock.areas.local.config.titleRule.enabled, false);
+  assert.deepEqual(mock.areas.local.config.titleRule.patterns, [
     'Spoilers',
     'Recap',
     'Live reaction',
@@ -113,7 +113,7 @@ test('blocked title options load and save patterns and the enabled checkbox', as
 
 test('options saves page edits on top of the latest stored config', async (t) => {
   const mock = installChromeMock({ install: false });
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: {
       titleRule: { enabled: true, patterns: ['Initial phrase'] },
     },
@@ -136,9 +136,9 @@ test('options saves page edits on top of the latest stored config', async (t) =>
 
   await main();
 
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: {
-      ...mock.areas.sync.config,
+      ...mock.areas.local.config,
       titleRule: { enabled: true, patterns: ['Added from popup'] },
     },
   });
@@ -149,17 +149,17 @@ test('options saves page edits on top of the latest stored config', async (t) =>
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.equal(mock.areas.sync.config.ageRule.maxAgeDays, 365);
+  assert.equal(mock.areas.local.config.ageRule.maxAgeDays, 365);
   assert.deepEqual(
-    mock.areas.sync.config.titleRule.patterns,
+    mock.areas.local.config.titleRule.patterns,
     ['Added from popup'],
   );
 
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: {
-      ...mock.areas.sync.config,
+      ...mock.areas.local.config,
       viewRule: {
-        ...mock.areas.sync.config.viewRule,
+        ...mock.areas.local.config.viewRule,
         minViews: 9876,
       },
     },
@@ -172,15 +172,15 @@ test('options saves page edits on top of the latest stored config', async (t) =>
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(
-    mock.areas.sync.config.titleRule.patterns,
+    mock.areas.local.config.titleRule.patterns,
     ['Saved from options'],
   );
-  assert.equal(mock.areas.sync.config.viewRule.minViews, 9876);
+  assert.equal(mock.areas.local.config.viewRule.minViews, 9876);
 });
 
 test('options round-trips the minimum age field', async (t) => {
   const mock = installChromeMock({ install: false });
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: { ageRule: { enabled: true, maxAgeDays: 1095, minAgeHours: 12 } },
   });
   const documentObject = new JSDOM(
@@ -209,12 +209,12 @@ test('options round-trips the minimum age field', async (t) => {
   input.value = '36';
   change();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(mock.areas.sync.config.ageRule.minAgeHours, 36);
+  assert.equal(mock.areas.local.config.ageRule.minAgeHours, 36);
 
   input.value = '';
   change();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(mock.areas.sync.config.ageRule.minAgeHours, 36);
+  assert.equal(mock.areas.local.config.ageRule.minAgeHours, 36);
 });
 
 async function renderStatusHarness(ageMs = null) {
@@ -292,17 +292,16 @@ test('options renders stale subscription cache age and a refresh prompt', async 
   assert.match(rendered.prompt, /Refresh now/);
 });
 
-test('settings export includes complete local and sync storage areas', async () => {
+test('settings export writes every known key in the single-area format', async () => {
   const harness = settingsHarness();
   await harness.localStorage.set({
     subs: { format: 2, ids: ['Channel A'], fetchedAt: 123 },
     watched: ['video-1'],
-  });
-  await harness.syncStorage.set({
     config: { enabled: false },
     channelOverrides: {
       'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
     },
+    notAKnownKey: { internal: true },
   });
   let exportedBlob;
   let revokedUrl;
@@ -333,14 +332,12 @@ test('settings export includes complete local and sync storage areas', async () 
   });
 
   assert.deepEqual(settings, {
-    format: 1,
+    format: 2,
     exportedAt: '2026-07-28T12:34:56.000Z',
-    local: {
+    data: {
       subs: { format: 2, ids: ['Channel A'], fetchedAt: 123 },
       watched: ['video-1'],
-    },
-    sync: {
-      config: { enabled: false },
+      config: { ...structuredClone(DEFAULT_CONFIG), enabled: false },
       channelOverrides: {
         'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
       },
@@ -378,10 +375,13 @@ test('settings export revokes its object URL when download click fails', async (
   assert.equal(harness.button.disabled, false);
 });
 
-test('valid settings import replaces both areas and reports imported counts', async () => {
+test('a format 1 import replaces the covered keys and reports imported counts', async () => {
   const harness = settingsHarness();
-  await harness.localStorage.set({ staleLocal: true });
-  await harness.syncStorage.set({ staleSync: true });
+  await harness.localStorage.set({
+    manualSubs: ['Stale Manual'],
+    helpDismissed: true,
+    notManagedByImport: 'kept',
+  });
   const subscriptions = Array.from({ length: 330 }, (_, index) => `sub-${index}`);
   const blocked = Array.from({ length: 12 }, (_, index) => `blocked-${index}`);
   const watched = Array.from({ length: 1843 }, (_, index) => `video-${index}`);
@@ -392,7 +392,6 @@ test('valid settings import replaces both areas and reports imported counts', as
       subs: { format: 2, ids: subscriptions, fetchedAt: 123 },
       blocklist: blocked,
       watched,
-      manualSubs: ['Manual Channel'],
     },
     sync: {
       config: { enabled: false },
@@ -419,11 +418,13 @@ test('valid settings import replaces both areas and reports imported counts', as
 
   assert.equal(result, true);
   assert.match(confirmationText, /replace the existing settings/i);
-  assert.deepEqual(harness.mock.areas.local, imported.local);
-  // A partial config is completed from the defaults; unknown keys go.
-  assert.deepEqual(harness.mock.areas.sync, {
+  // Covered keys the file does not carry are removed; a partial config is
+  // completed from the defaults; keys outside the schema are left alone.
+  assert.deepEqual(harness.mock.areas.local, {
+    ...imported.local,
     config: { ...structuredClone(DEFAULT_CONFIG), enabled: false },
     channelOverrides: imported.sync.channelOverrides,
+    notManagedByImport: 'kept',
   });
   assert.equal(rendered, true);
   assert.equal(
@@ -431,6 +432,32 @@ test('valid settings import replaces both areas and reports imported counts', as
     'Imported 330 subscriptions, 12 blocked channels, 1843 watched videos, 2 channel overrides.',
   );
   assert.equal(harness.button.disabled, false);
+});
+
+test('a format 2 import round-trips an export', async () => {
+  const source = settingsHarness();
+  await source.localStorage.set({
+    blocklist: ['Blocked'],
+    watched: ['video-1'],
+    config: { ...structuredClone(DEFAULT_CONFIG), enabled: false },
+    channelOverrides: { 'Channel A': { watched: { enabled: false } } },
+  });
+  const exported = await exportSettings({
+    ...source,
+    createObjectURL: () => 'blob:round-trip',
+    revokeObjectURL: () => {},
+    createElement: () => ({ click() {} }),
+  });
+
+  const target = settingsHarness();
+  await target.localStorage.set({ manualSubs: ['Removed By Import'] });
+  assert.equal(await importSettings({
+    ...target,
+    file: { text: async () => JSON.stringify(exported) },
+    confirmFn: () => true,
+  }), true);
+
+  assert.deepEqual(target.mock.areas.local, source.mock.areas.local);
 });
 
 test('settings import normalizes channel overrides and drops junk', async () => {
@@ -460,7 +487,7 @@ test('settings import normalizes channel overrides and drops junk', async () => 
     confirmFn: () => true,
     renderResult: async () => {},
   }), true);
-  assert.deepEqual(harness.mock.areas.sync, {
+  assert.deepEqual(harness.mock.areas.local, {
     config: structuredClone(DEFAULT_CONFIG),
     channelOverrides: {
       'Channel A': {
@@ -507,7 +534,7 @@ const settleChanges = () => new Promise((resolve) => setTimeout(resolve, 0));
 test('channel rules render existing overrides', async (t) => {
   const harness = overridesHarness();
   t.after(harness.restore);
-  await harness.mock.chrome.storage.sync.set({
+  await harness.mock.chrome.storage.local.set({
     channelOverrides: {
       'Channel A': {
         watched: { enabled: false },
@@ -543,7 +570,7 @@ test('channel rules add and edit rows persist normalized overrides', async (t) =
   change(channel);
   await settleChanges();
 
-  assert.deepEqual(harness.mock.areas.sync.channelOverrides, {
+  assert.deepEqual(harness.mock.areas.local.channelOverrides, {
     'Channel A': {
       watched: { enabled: false },
       age: { enabled: true, maxAgeDays: 90 },
@@ -556,7 +583,7 @@ test('channel rules add and edit rows persist normalized overrides', async (t) =
   change(row.querySelector('.override-view-limit'));
   await settleChanges();
 
-  assert.deepEqual(harness.mock.areas.sync.channelOverrides['Channel A'].view, {
+  assert.deepEqual(harness.mock.areas.local.channelOverrides['Channel A'].view, {
     enabled: true,
     minViews: 2500,
   });
@@ -565,7 +592,7 @@ test('channel rules add and edit rows persist normalized overrides', async (t) =
 test('channel rules remove rows and ignore garbage number input', async (t) => {
   const harness = overridesHarness();
   t.after(harness.restore);
-  await harness.mock.chrome.storage.sync.set({
+  await harness.mock.chrome.storage.local.set({
     channelOverrides: {
       'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
       'Channel B': { view: { enabled: true, minViews: 1000 } },
@@ -580,7 +607,7 @@ test('channel rules remove rows and ignore garbage number input', async (t) => {
   change(channelARow.querySelector('.override-age-limit'));
   await settleChanges();
 
-  assert.deepEqual(harness.mock.areas.sync.channelOverrides['Channel A'], {
+  assert.deepEqual(harness.mock.areas.local.channelOverrides['Channel A'], {
     age: { enabled: true, maxAgeDays: 30 },
   });
 
@@ -590,7 +617,7 @@ test('channel rules remove rows and ignore garbage number input', async (t) => {
   channelBRow.querySelector('.override-remove').click();
   await settleChanges();
 
-  assert.deepEqual(harness.mock.areas.sync.channelOverrides, {
+  assert.deepEqual(harness.mock.areas.local.channelOverrides, {
     'Channel A': { age: { enabled: true, maxAgeDays: 30 } },
   });
 });
@@ -657,11 +684,13 @@ test('settings import rejects an array as the local storage area', async () => {
   assert.equal(harness.button.disabled, false);
 });
 
-test('local-only settings import leaves sync storage untouched', async () => {
+test('a local-only format 1 import leaves settings and channel rules untouched', async () => {
   const harness = settingsHarness();
-  await harness.localStorage.set({ staleLocal: true });
-  await harness.syncStorage.set({ config: { enabled: true }, keep: 'sync' });
-  const originalSync = structuredClone(harness.mock.areas.sync);
+  const kept = {
+    config: { ...structuredClone(DEFAULT_CONFIG), enabled: false },
+    channelOverrides: { 'Channel A': { watched: { enabled: false } } },
+  };
+  await harness.localStorage.set({ ...kept, manualSubs: ['Stale Manual'] });
   const local = {
     subs: { format: 2, ids: ['Imported Channel'], fetchedAt: 123 },
     watched: ['video-1'],
@@ -675,8 +704,7 @@ test('local-only settings import leaves sync storage untouched', async () => {
   });
 
   assert.equal(result, true);
-  assert.deepEqual(harness.mock.areas.local, local);
-  assert.deepEqual(harness.mock.areas.sync, originalSync);
+  assert.deepEqual(harness.mock.areas.local, { ...kept, ...local });
   assert.equal(harness.button.disabled, false);
 });
 
@@ -926,7 +954,7 @@ test('manual refresh acceptance proceeds with the existing refresh flow', async 
 
 test('options loads and saves the native feedback checkbox', async (t) => {
   const mock = installChromeMock({ install: false });
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: { blocklistRule: { enabled: true, sendNativeFeedback: true } },
   });
   const documentObject = new JSDOM(
@@ -956,14 +984,14 @@ test('options loads and saves the native feedback checkbox', async (t) => {
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(
-    mock.areas.sync.config.blocklistRule.sendNativeFeedback,
+    mock.areas.local.config.blocklistRule.sendNativeFeedback,
     false,
   );
 });
 
 test('options loads and saves the subscription sync checkbox', async (t) => {
   const mock = installChromeMock({ install: false });
-  await mock.chrome.storage.sync.set({
+  await mock.chrome.storage.local.set({
     config: { subsSync: { enabled: true } },
   });
   const documentObject = new JSDOM(
@@ -992,28 +1020,26 @@ test('options loads and saves the subscription sync checkbox', async (t) => {
     new documentObject.defaultView.Event('change', { bubbles: true }),
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(mock.areas.sync.config.subsSync.enabled, false);
+  assert.equal(mock.areas.local.config.subsSync.enabled, false);
 });
 
 test('settings import keeps only known keys with valid values', async () => {
   const harness = settingsHarness();
   const imported = {
-    format: 1,
-    local: {
+    format: 2,
+    data: {
       blocklist: ['Good', 42, '   ', 'x'.repeat(500)],
       watched: ['abcdefghijk', '<script>', 7],
       updateCheck: { lastCheckedAt: 5, latestTag: 'javascript:alert(1)' },
       subs: { format: 2, ids: 'not-a-list', fetchedAt: 1 },
       evilKey: { anything: true },
-    },
-    sync: {
+      syncSettings: { url: 'https://evil.example/f', password: 'x' },
       config: {
         enabled: 'yes',
         ageRule: { enabled: true, maxAgeDays: -5, minAgeHours: 'NaN' },
         titleRule: { enabled: true, patterns: ['spam', 9, ' spam '] },
         injected: { key: 1 },
       },
-      unknownSyncKey: 1,
     },
   };
 
@@ -1028,13 +1054,15 @@ test('settings import keeps only known keys with valid values', async () => {
     blocklist: ['Good'],
     watched: ['abcdefghijk'],
     updateCheck: { lastCheckedAt: 5 },
+    config: {
+      ...structuredClone(DEFAULT_CONFIG),
+      titleRule: { enabled: true, patterns: ['spam'] },
+    },
   });
-  assert.deepEqual(harness.mock.areas.sync.config, {
-    ...structuredClone(DEFAULT_CONFIG),
-    titleRule: { enabled: true, patterns: ['spam'] },
-  });
-  assert.equal(Object.hasOwn(harness.mock.areas.sync, 'unknownSyncKey'), false);
-  assert.match(harness.statusElement.textContent, /Ignored unknown or invalid entries: subs, evilKey, unknownSyncKey\./);
+  assert.match(
+    harness.statusElement.textContent,
+    /Ignored unknown or invalid entries: subs, evilKey, syncSettings\./,
+  );
 });
 
 test('settings import warns before a file turns on account feedback', async () => {

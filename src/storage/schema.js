@@ -112,7 +112,11 @@ function cleanUpdateCheck(value) {
   return output;
 }
 
-const LOCAL_CLEANERS = {
+const CLEANERS = {
+  config: (value) => (isObject(value) ? cleanConfig(value) : undefined),
+  channelOverrides: (value) => (
+    isObject(value) ? Object.fromEntries(normalizeOverrides(value)) : undefined
+  ),
   blocklist: (value) => (Array.isArray(value) ? cleanNames(value) : undefined),
   manualSubs: (value) => (Array.isArray(value) ? cleanNames(value) : undefined),
   watched: (value) => (Array.isArray(value) ? cleanVideoIds(value) : undefined),
@@ -124,34 +128,26 @@ const LOCAL_CLEANERS = {
   helpDismissed: (value) => (typeof value === 'boolean' ? value : undefined),
 };
 
-const SYNC_CLEANERS = {
-  config: (value) => (isObject(value) ? cleanConfig(value) : undefined),
-  channelOverrides: (value) => (
-    isObject(value) ? Object.fromEntries(normalizeOverrides(value)) : undefined
-  ),
-};
+// Every key the extension keeps in chrome.storage.local. Sync credentials
+// and sync state are not here on purpose: they never leave IndexedDB.
+export const DATA_KEYS = Object.freeze(Object.keys(CLEANERS));
 
-function cleanArea(values, cleaners) {
+// Keys that a format 1 export carried in its "sync" section.
+export const LEGACY_SYNC_KEYS = Object.freeze(['config', 'channelOverrides']);
+
+export function cleanStoredData(values) {
   const output = {};
   const dropped = [];
-  for (const [key, value] of Object.entries(values)) {
-    if (!Object.hasOwn(cleaners, key)) {
+  for (const [key, value] of Object.entries(isObject(values) ? values : {})) {
+    if (!Object.hasOwn(CLEANERS, key)) {
       dropped.push(key);
       continue;
     }
-    const cleaned = cleaners[key](value);
+    const cleaned = CLEANERS[key](value);
     if (cleaned === undefined) dropped.push(key);
     else output[key] = cleaned;
   }
   return { values: output, dropped };
-}
-
-export function cleanLocalArea(values) {
-  return cleanArea(values, LOCAL_CLEANERS);
-}
-
-export function cleanSyncArea(values) {
-  return cleanArea(values, SYNC_CLEANERS);
 }
 
 // Settings a file must not be able to switch on without the user seeing it:

@@ -217,11 +217,13 @@ export function createSyncEngine({
   privateStorage = storage?.local,
   minIterations = MIN_PBKDF2_ITERATIONS,
   minPassphraseLength = MIN_PASSPHRASE_LENGTH,
+  // Serializes the engine's storage read-modify-write against other writers.
+  lock = (task) => task(),
   now = Date.now,
   log = console,
 } = {}) {
-  if (!storage?.local || !storage?.sync) {
-    throw new TypeError('storage.local and storage.sync are required');
+  if (!storage?.local) {
+    throw new TypeError('storage.local is required');
   }
   if (
     typeof privateStorage?.get !== 'function'
@@ -265,12 +267,16 @@ export function createSyncEngine({
   }
 
   async function readProjectedState() {
-    const [synced, local] = await Promise.all([
-      storage.sync.get(['config', 'channelOverrides']),
-      storage.local.get(['blocklist', 'manualSubs', 'subs', 'watched']),
+    const local = await storage.local.get([
+      'config',
+      'channelOverrides',
+      'blocklist',
+      'manualSubs',
+      'subs',
+      'watched',
     ]);
-    const overrides = synced.channelOverrides;
-    const config = mergeConfig(DEFAULT_CONFIG, synced.config);
+    const overrides = local.channelOverrides;
+    const config = mergeConfig(DEFAULT_CONFIG, local.config);
     const subsEntry = usableSubsEntry(local.subs);
     return {
       config,
@@ -339,7 +345,11 @@ export function createSyncEngine({
     return doc;
   }
 
-  async function capture(timestamp = timestampFrom(now)) {
+  function capture(timestamp = timestampFrom(now)) {
+    return lock(() => captureUnlocked(timestamp));
+  }
+
+  async function captureUnlocked(timestamp) {
     const [privateState, projectedState] = await Promise.all([
       readPrivateState(),
       readProjectedState(),
@@ -448,7 +458,6 @@ export function createSyncEngine({
     );
     const current = docToStorage(normalizedSnapshot);
     const desired = docToStorage(doc);
-    const syncWrites = {};
     const localWrites = {};
 
     const desiredConfig = mergeConfig(DEFAULT_CONFIG, desired.configOverlay);
@@ -457,13 +466,13 @@ export function createSyncEngine({
       withoutUpdateCheck(state.config),
       withoutUpdateCheck(desiredConfig),
     )) {
-      syncWrites.config = desiredConfig;
+      localWrites.config = desiredConfig;
     }
 
     const currentOverrides = asStoredOverrides(current.channelOverrides);
     const desiredOverrides = asStoredOverrides(desired.channelOverrides);
     if (!equal(currentOverrides, desiredOverrides)) {
-      syncWrites.channelOverrides = desiredOverrides;
+      localWrites.channelOverrides = desiredOverrides;
     }
 
     if (!setsEqual(asSet(current.blocklist), asSet(desired.blocklist))) {
@@ -494,22 +503,17 @@ export function createSyncEngine({
       localWrites.watched = desired.watched;
     }
 
-    await Promise.all([
-      Object.keys(syncWrites).length > 0
-        ? storage.sync.set(syncWrites)
-        : Promise.resolve(),
-      Object.keys(localWrites).length > 0
-        ? storage.local.set(localWrites)
-        : Promise.resolve(),
-    ]);
-    return Object.keys(syncWrites).length > 0
-      || Object.keys(localWrites).length > 0;
+    if (Object.keys(localWrites).length === 0) return false;
+    await storage.local.set(localWrites);
+    return true;
   }
 
-  async function saveAndProject(doc) {
-    const documentChanged = await persistDocument(doc);
-    const projectionChanged = await applyProjection(doc);
-    return documentChanged || projectionChanged;
+  function saveAndProject(doc) {
+    return lock(async () => {
+      const documentChanged = await persistDocument(doc);
+      const projectionChanged = await applyProjection(doc);
+      return documentChanged || projectionChanged;
+    });
   }
 
   async function decryptRemote(remote, key) {
@@ -524,8 +528,7 @@ export function createSyncEngine({
     return { error: message };
   }
 
-  async function runSync({ force = false } = {}) {
-    void force;
+  async function runSync() {
     try {
       const timestamp = timestampFrom(now);
       const privateState = await readPrivateState();
@@ -621,7 +624,12 @@ export function createSyncEngine({
     }
   }
 
-  async function bootstrap(docOrNull) {
+  // No network inside: safe to hold the write lock for the whole merge.
+  function bootstrap(docOrNull) {
+    return lock(() => bootstrapUnlocked(docOrNull));
+  }
+
+  async function bootstrapUnlocked(docOrNull) {
     const timestamp = timestampFrom(now);
     const [privateState, projectedState] = await Promise.all([
       readPrivateState(),
@@ -742,7 +750,7 @@ export function createSyncEngine({
         },
       });
       await bootstrap(remoteDoc);
-      const result = await runSync({ force: true });
+      const result = await runSync();
       return result.error ? result : { ok: true };
     } catch (error) {
       const message = errorMessage(error);

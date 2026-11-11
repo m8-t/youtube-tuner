@@ -322,8 +322,9 @@ test('sync URL validation enforces an HTTPS file URL', () => {
   );
 });
 
-test('settings export excludes local sync state and credentials', async () => {
+test('settings export never contains sync state or credentials', async () => {
   const harness = settingsHarness();
+  // 1.7.0 and older kept these in chrome.storage.local.
   await harness.localStorage.set({
     syncDoc: { private: 'document' },
     syncMeta: { revision: '"secret-revision"' },
@@ -342,24 +343,12 @@ test('settings export excludes local sync state and credentials', async () => {
     createElement: () => ({ click() {} }),
   });
 
-  assert.deepEqual(settings.local, { watched: ['video-1'] });
+  assert.deepEqual(settings.data, { watched: ['video-1'] });
+  assert.equal(JSON.stringify(settings).includes('app-secret'), false);
 });
 
-test('settings import ignores local sync keys and preserves current sync state', async () => {
+test('settings import never writes sync state or credentials', async () => {
   const harness = settingsHarness();
-  const currentSyncState = {
-    syncDoc: { private: 'current-document' },
-    syncMeta: { revision: '"current-revision"' },
-    syncSettings: {
-      url: 'https://current.example.com/dav/file.bin',
-      username: 'current-user',
-      password: 'current-secret',
-    },
-  };
-  await harness.localStorage.set({
-    staleLocal: true,
-    ...currentSyncState,
-  });
   const imported = {
     format: 1,
     local: {
@@ -382,10 +371,7 @@ test('settings import ignores local sync keys and preserves current sync state',
   });
 
   assert.equal(result, true);
-  assert.deepEqual(harness.mock.areas.local, {
-    ...currentSyncState,
-    watched: ['video-2'],
-  });
+  assert.deepEqual(harness.mock.areas.local, { watched: ['video-2'] });
 });
 
 test('Disable sync gives the WebDAV host permission back', async (t) => {

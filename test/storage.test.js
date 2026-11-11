@@ -41,7 +41,7 @@ test('config merges stored values over defaults', async () => {
 });
 
 test('a stored config without minAgeHours loads it as 0', async () => {
-  await chrome.storage.sync.set({
+  await chrome.storage.local.set({
     config: { ageRule: { enabled: true, maxAgeDays: 500 } },
   });
   const config = await loadConfig();
@@ -50,17 +50,44 @@ test('a stored config without minAgeHours loads it as 0', async () => {
 });
 
 test('a partial stored config still gets every default key', async () => {
-  await chrome.storage.sync.set({ config: { enabled: false } });
+  await chrome.storage.local.set({ config: { enabled: false } });
   const config = await loadConfig();
   assert.equal(config.enabled, false);
   assert.equal(config.viewRule.graceHours, 48);
   assert.equal(config.watchedRule.enabled, true);
 });
 
-test('config lives in sync, not local', async () => {
+test('config lives in local, where no per-item quota applies', async () => {
   await saveConfig(DEFAULT_CONFIG);
-  assert.ok('config' in mock.areas.sync);
-  assert.ok(!('config' in mock.areas.local));
+  assert.ok('config' in mock.areas.local);
+  assert.ok(!('config' in mock.areas.sync));
+});
+
+test('settings and channel rules move from sync to local exactly once', async () => {
+  const { migrateStorageLayout } = await import('../src/storage/migrate.js');
+  await chrome.storage.sync.set({
+    config: { enabled: false },
+    channelOverrides: { 'Channel A': { watched: { enabled: false } } },
+  });
+
+  assert.equal(await migrateStorageLayout(), true);
+  assert.deepEqual(mock.areas.sync, {});
+  assert.equal(mock.areas.local.config.enabled, false);
+  assert.deepEqual(mock.areas.local.channelOverrides, {
+    'Channel A': { watched: { enabled: false } },
+  });
+  assert.equal(await migrateStorageLayout(), false);
+});
+
+test('the layout migration never overwrites newer local settings', async () => {
+  const { migrateStorageLayout } = await import('../src/storage/migrate.js');
+  await chrome.storage.local.set({ config: { enabled: true } });
+  await chrome.storage.sync.set({ config: { enabled: false } });
+
+  await migrateStorageLayout();
+
+  assert.equal(mock.areas.local.config.enabled, true);
+  assert.deepEqual(mock.areas.sync, {});
 });
 
 test('watched set round-trips', async () => {
@@ -396,7 +423,7 @@ test('loadSubsMeta changes stale at SUBS_STALE_AFTER_MS', async (t) => {
 });
 
 test('overrides load normalized valid entries and drop garbage', async () => {
-  await chrome.storage.sync.set({
+  await chrome.storage.local.set({
     channelOverrides: {
       '  Channel A  \nIgnored': {
         watched: { enabled: false, garbage: true },
@@ -431,7 +458,7 @@ test('overrides load normalized valid entries and drop garbage', async () => {
 });
 
 test('overrides fail closed for malformed storage and storage errors', async (t) => {
-  await chrome.storage.sync.set({ channelOverrides: ['not', 'an', 'object'] });
+  await chrome.storage.local.set({ channelOverrides: ['not', 'an', 'object'] });
   assert.deepEqual(await loadOverrides(), new Map());
 
   const originalGet = chrome.storage.sync.get;
@@ -444,7 +471,7 @@ test('overrides fail closed for malformed storage and storage errors', async (t)
   assert.deepEqual(await loadOverrides(), new Map());
 });
 
-test('overrides save to sync with normalized keys and empty entries removed', async () => {
+test('overrides save to local with normalized keys and empty entries removed', async () => {
   await saveOverrides(new Map([
     ['  Channel A \nIgnored', {
       watched: { enabled: false },
@@ -459,7 +486,7 @@ test('overrides save to sync with normalized keys and empty entries removed', as
     }],
   ]));
 
-  assert.deepEqual(mock.areas.sync.channelOverrides, {
+  assert.deepEqual(mock.areas.local.channelOverrides, {
     'Channel A': {
       watched: { enabled: false },
       age: { enabled: true },
@@ -470,7 +497,7 @@ test('overrides save to sync with normalized keys and empty entries removed', as
       view: { enabled: false },
     },
   });
-  assert.equal('channelOverrides' in mock.areas.local, false);
+  assert.equal('channelOverrides' in mock.areas.sync, false);
 });
 
 test('overrides round-trip every supported field', async () => {

@@ -1,38 +1,45 @@
 import { detectLocale } from './locale/detect.js';
-import { decide } from './rules/decide.js';
-import { readTile, isOutermostTile, TILE_SELECTOR } from './dom/tile-adapter.js';
-import { createApplier } from './dom/applier.js';
-import { injectStyles } from './dom/styles.js';
-import { collapseEmptySections } from './dom/empty-sections.js';
-import { attachBlockButtons } from './dom/block-button.js';
-import { showBlockToast, removeBlockToast } from './dom/block-toast.js';
-import { createNativeUndoWatcher } from './dom/native-undo.js';
 import { createStarvationNudge } from './dom/starvation.js';
-import { loadConfig, onConfigChange } from './storage/config.js';
-import { loadWatched, addWatched } from './storage/watched.js';
-import { loadBlocklist, addBlocked, removeBlocked } from './storage/blocklist.js';
-import { loadOverrides } from './storage/overrides.js';
-import {
-  addSubNames,
-  loadSubs,
-  loadSubsMeta,
-  loadManualSubs,
-  removeSubNames,
-  unionSubs,
-} from './storage/subs.js';
 import { createSubscribeCapture } from './subs-capture.js';
 import {
-  collectSubscriptions,
+  SUBS_REFRESH_ATTEMPTED_KEY,
   requestPassiveSubscriptionCollection,
   requestSubscriptionCollection,
 } from './subs-refresh.js';
 import { DEFAULT_CONFIG } from './rules/defaults.js';
+import { createClient, hydrateState } from './content/client.js';
+import { createRuntimeLifeline } from './content/lifeline.js';
+import {
+  createFilteringLifecycle,
+  removeContentArtifacts,
+} from './content/lifecycle.js';
+import {
+  SUBS_COLLECT_HASH,
+  SUBS_COLLECTION_RESULT_MESSAGE,
+  startSubscriptionCollectionMode,
+  stopPassiveCollectionOnNavigation,
+} from './content/collection.js';
 
-export const SUBS_COLLECT_HASH = '#ytt-collect';
-export const SUBS_COLLECTION_RESULT_MESSAGE = 'subs-collection-result';
-export const LIFELINE_PORT_NAME = 'ytt-lifeline';
-export const LIFELINE_RECONNECT_DELAY_MS = 1_000;
-export const LIFELINE_MAX_RECONNECT_DELAY_MS = 30_000;
+export {
+  LIFELINE_MAX_RECONNECT_DELAY_MS,
+  LIFELINE_PORT_NAME,
+  LIFELINE_RECONNECT_DELAY_MS,
+  createRuntimeLifeline,
+} from './content/lifeline.js';
+export { createDomHealthCanary } from './content/canary.js';
+export {
+  createFilteringLifecycle,
+  isSupportedRoute,
+  removeContentArtifacts,
+} from './content/lifecycle.js';
+export {
+  SUBS_COLLECT_HASH,
+  SUBS_COLLECTION_RESULT_MESSAGE,
+  startSubscriptionCollectionMode,
+  stopPassiveCollectionOnNavigation,
+  subscriptionCollectionResponse,
+  subscriptionCollectionResultMessage,
+} from './content/collection.js';
 
 let config = DEFAULT_CONFIG;
 let state = {
@@ -43,199 +50,18 @@ let state = {
   overrides: new Map(),
   locale: null,
 };
+let fetchedSubs = null;
+let client;
 let nudge;
 let filtering;
 let passiveSubscriptionCollection = null;
 let contentTeardown = null;
 
-export function createRuntimeLifeline({
-  runtime = globalThis.chrome?.runtime,
-  onInvalidated = () => {},
-  setTimeoutFn = setTimeout,
-  clearTimeoutFn = clearTimeout,
-  reconnectDelayMs = LIFELINE_RECONNECT_DELAY_MS,
-  maxReconnectDelayMs = LIFELINE_MAX_RECONNECT_DELAY_MS,
-} = {}) {
-  let port = null;
-  let reconnectTimer = null;
-  let retryDelayMs = reconnectDelayMs;
-  let stopped = false;
-
-  function runtimeIsValid() {
-    try {
-      return typeof runtime?.id === 'string' && runtime.id.length > 0;
-    } catch {
-      return false;
-    }
-  }
-
-  function invalidate() {
-    if (stopped) return;
-    stopped = true;
-    if (reconnectTimer !== null) {
-      try {
-        clearTimeoutFn(reconnectTimer);
-      } catch {}
-      reconnectTimer = null;
-    }
-    port = null;
-    try {
-      onInvalidated();
-    } catch {
-      // An orphan must never throw teardown failures into the page.
-    }
-  }
-
-  function scheduleReconnect() {
-    if (stopped || reconnectTimer !== null) return;
-    const delay = retryDelayMs;
-    retryDelayMs = Math.min(retryDelayMs * 2, maxReconnectDelayMs);
-    try {
-      reconnectTimer = setTimeoutFn(() => {
-        reconnectTimer = null;
-        if (stopped) return;
-        if (!runtimeIsValid()) {
-          invalidate();
-          return;
-        }
-        connect();
-      }, delay);
-    } catch {
-      // Losing the retry timer must not affect the host page.
-    }
-  }
-
-  function handleDisconnect() {
-    port = null;
-    if (stopped) return;
-    if (!runtimeIsValid()) {
-      invalidate();
-      return;
-    }
-    retryDelayMs = reconnectDelayMs;
-    scheduleReconnect();
-  }
-
-  function connect() {
-    if (stopped) return false;
-    if (!runtimeIsValid()) {
-      invalidate();
-      return false;
-    }
-    try {
-      const nextPort = runtime.connect({ name: LIFELINE_PORT_NAME });
-      if (typeof nextPort?.onDisconnect?.addListener !== 'function') {
-        throw new Error('lifeline port has no disconnect event');
-      }
-      nextPort.onDisconnect.addListener(handleDisconnect);
-      port = nextPort;
-      retryDelayMs = reconnectDelayMs;
-      return true;
-    } catch {
-      port = null;
-      if (!runtimeIsValid()) {
-        invalidate();
-      } else {
-        scheduleReconnect();
-      }
-      return false;
-    }
-  }
-
-  function start() {
-    try {
-      return connect();
-    } catch {
-      return false;
-    }
-  }
-
-  function stop() {
-    if (stopped) return;
-    stopped = true;
-    if (reconnectTimer !== null) {
-      try {
-        clearTimeoutFn(reconnectTimer);
-      } catch {}
-      reconnectTimer = null;
-    }
-    const currentPort = port;
-    port = null;
-    try {
-      currentPort?.onDisconnect?.removeListener?.(handleDisconnect);
-    } catch {}
-    try {
-      currentPort?.disconnect?.();
-    } catch {}
-  }
-
-  return { start, stop };
-}
-
-export function isSupportedRoute(pathname) {
-  return pathname === '/' || pathname === '/watch' || pathname === '/feed/subscriptions';
-}
-
-export function createDomHealthCanary() {
-  let degradedScanStreak = 0;
-  let status = 'ok';
-
-  function observe({
-    totalMatchedTiles = 0,
-    nullChannelNameTiles = 0,
-  } = {}) {
-    const degradedScan = totalMatchedTiles >= 8
-      && nullChannelNameTiles / totalMatchedTiles > 0.75;
-    degradedScanStreak = degradedScan ? degradedScanStreak + 1 : 0;
-    status = degradedScanStreak >= 5 ? 'degraded' : 'ok';
-    return status;
-  }
-
-  function reset() {
-    degradedScanStreak = 0;
-    status = 'ok';
-    return status;
-  }
-
-  return {
-    observe,
-    reset,
-    get status() {
-      return status;
-    },
-  };
-}
-
-async function refreshState() {
-  const [fetchedSubs, subsMeta, manualSubs, blocklist, watched, overrides] =
-    await Promise.all([
-      loadSubs(),
-      loadSubsMeta(),
-      loadManualSubs(),
-      loadBlocklist(),
-      loadWatched(),
-      loadOverrides(),
-    ]);
-  state = {
-    subs: unionSubs(fetchedSubs, manualSubs),
-    subsStale: subsMeta === null || subsMeta.stale === true,
-    blocklist,
-    watched,
-    overrides,
-    locale: detectLocale(document),
-  };
-  return fetchedSubs;
-}
-
-export function hasStateStorageChange(changes, area) {
-  if (area === 'sync') return Boolean(changes.channelOverrides);
-  if (area !== 'local') return false;
-  return Boolean(
-    changes.blocklist ||
-    changes.subs ||
-    changes.manualSubs ||
-    changes.watched,
-  );
+function applySnapshot(raw) {
+  const hydrated = hydrateState(raw, detectLocale(document));
+  config = hydrated.config;
+  state = hydrated.state;
+  fetchedSubs = hydrated.fetchedSubs;
 }
 
 // Record every video the user actually opens. YouTube's resume-playback
@@ -243,7 +69,7 @@ export function hasStateStorageChange(changes, area) {
 function recordCurrentVideo() {
   const match = /[?&]v=([\w-]{5,})/.exec(location.search);
   if (!match) return;
-  addWatched(match[1])
+  client.addWatched(match[1])
     .then(() => {
       state.watched.add(match[1]);
     })
@@ -257,251 +83,6 @@ function onNavigate() {
   filtering.sync();
 }
 
-export function removeContentArtifacts(doc = document) {
-  removeBlockToast(doc);
-  for (const button of doc.querySelectorAll('button[class*="ytt-"]')) {
-    if ([...button.classList].some((name) => name.startsWith('ytt-'))) {
-      button.remove();
-    }
-  }
-  for (const element of doc.querySelectorAll('[class*="ytt-"]')) {
-    for (const className of [...element.classList]) {
-      if (className.startsWith('ytt-')) element.classList.remove(className);
-    }
-  }
-  for (const style of doc.querySelectorAll('style[id^="ytt-"]')) {
-    style.remove();
-  }
-}
-
-export function createFilteringLifecycle({
-  documentObject,
-  nudgeObject,
-  getConfig,
-  getState,
-  getPathname,
-  sendMessage = (message) => chrome.runtime.sendMessage(message),
-  addBlockedChannel = addBlocked,
-  removeBlockedChannel = removeBlocked,
-  nativeUndoWatcher = createNativeUndoWatcher({ doc: documentObject }),
-} = {}) {
-  const root = documentObject.documentElement;
-  let active = false;
-  let initialized = false;
-  let currentPathname = null;
-  let applier;
-  const domHealthCanary = createDomHealthCanary();
-
-  function sendCounts(counts) {
-    try {
-      Promise.resolve(sendMessage({
-        type: 'counts',
-        ...counts,
-        enabled: getConfig().enabled,
-        subsStale: getState().subsStale === true,
-        domHealth: domHealthCanary.status,
-      })).catch(() => {});
-    } catch {
-      // Badge reporting must never affect filtering.
-    }
-  }
-
-  function reportCounts(counts) {
-    if (active) domHealthCanary.observe(counts);
-    const reportedCounts = active
-      ? counts
-      : { hidden: 0, visible: 0 };
-    nudgeObject.onCounts(reportedCounts);
-
-    if (!active) {
-      sendCounts(reportedCounts);
-      return;
-    }
-
-    collapseEmptySections({ root, doc: documentObject });
-    sendCounts(reportedCounts);
-
-    attachBlockButtons({
-      root,
-      tileSelector: TILE_SELECTOR,
-      readTile,
-      doc: documentObject,
-      offerWatchLater: getPathname() === '/watch',
-      dismissAction: getPathname() === '/feed/subscriptions'
-        ? 'hide'
-        : 'notInterested',
-      shouldOffer: getPathname() === '/feed/subscriptions'
-        ? () => false
-        : (channelName) => {
-          const { subs } = getState();
-          return subs === null || !subs.has(channelName.trim());
-        },
-      onBlock: async (channelName) => {
-        await addBlockedChannel(channelName);
-        getState().blocklist.add(channelName);
-        scan();
-      },
-      sendNativeFeedback: getConfig().blocklistRule?.sendNativeFeedback === true,
-      onLocalBlock: (channelName) => {
-        showBlockToast({
-          doc: documentObject,
-          channelName,
-          onUndo: async () => {
-            try {
-              await removeBlockedChannel(channelName);
-              getState().blocklist.delete(channelName);
-              scan();
-            } catch {
-              // Undo failures must not surface in the page.
-            }
-          },
-        });
-      },
-    });
-  }
-
-  applier = createApplier({
-    root,
-    decide,
-    readTile,
-    isOutermostTile,
-    tileSelector: TILE_SELECTOR,
-    getConfig,
-    getState,
-    onCounts: reportCounts,
-  });
-
-  function sync() {
-    const pathname = getPathname();
-    const next = getConfig().enabled && isSupportedRoute(pathname);
-    if (initialized && pathname !== currentPathname) {
-      domHealthCanary.reset();
-    }
-    currentPathname = pathname;
-    if (initialized && next === active) {
-      scan();
-      return active;
-    }
-
-    initialized = true;
-    active = next;
-    domHealthCanary.reset();
-    if (active) {
-      injectStyles(documentObject);
-      nativeUndoWatcher.start();
-      applier.start();
-    } else {
-      nativeUndoWatcher.stop();
-      applier.stop();
-      removeContentArtifacts(documentObject);
-      reportCounts({ hidden: 0, visible: 0 });
-    }
-    return active;
-  }
-
-  function scan() {
-    if (active) {
-      applier.scan();
-    } else {
-      reportCounts({ hidden: 0, visible: 0 });
-    }
-  }
-
-  function stop() {
-    initialized = true;
-    active = false;
-    domHealthCanary.reset();
-    nativeUndoWatcher.stop();
-    applier.stop();
-    removeContentArtifacts(documentObject);
-    reportCounts({ hidden: 0, visible: 0 });
-  }
-
-  function resetDomHealth() {
-    domHealthCanary.reset();
-  }
-
-  return {
-    get active() {
-      return active;
-    },
-    reportCounts,
-    resetDomHealth,
-    scan,
-    stop,
-    sync,
-  };
-}
-
-export function subscriptionCollectionResponse(result) {
-  if (
-    result?.complete === true &&
-    Array.isArray(result.names) &&
-    result.names.length > 0
-  ) {
-    return { count: result.names.length };
-  }
-
-  const response = {
-    reason:
-      typeof result?.reason === 'string'
-        ? result.reason
-        : 'scrape-incomplete',
-  };
-  if (result?.diagnostics && typeof result.diagnostics === 'object') {
-    response.diagnostics = result.diagnostics;
-  }
-  return response;
-}
-
-export function subscriptionCollectionResultMessage(result) {
-  const response = subscriptionCollectionResponse(result);
-  return {
-    type: SUBS_COLLECTION_RESULT_MESSAGE,
-    complete: result?.complete === true,
-    count: Array.isArray(result?.names) ? result.names.length : 0,
-    ...(response.reason ? { reason: response.reason } : {}),
-    ...(result?.diagnostics && typeof result.diagnostics === 'object'
-      ? { diagnostics: result.diagnostics }
-      : {}),
-  };
-}
-
-export async function startSubscriptionCollectionMode({
-  pathname,
-  collectMarker,
-  cachedSubs,
-  subsStale = false,
-  documentObject,
-  windowObject,
-  requestCollection = requestSubscriptionCollection,
-  collect = collectSubscriptions,
-  requestPassive = requestPassiveSubscriptionCollection,
-  sendMessage = (message) => chrome.runtime.sendMessage(message),
-} = {}) {
-  if (pathname !== '/feed/channels') return null;
-
-  if (collectMarker) {
-    if (windowObject?.top !== windowObject) return null;
-    const result = await requestCollection({
-      force: true,
-      collect: () => collect({ documentObject, windowObject }),
-    });
-    await sendMessage(subscriptionCollectionResultMessage(result));
-    return { mode: 'active', result };
-  }
-
-  if (cachedSubs !== null && !subsStale) return null;
-  const controller = await requestPassive({ documentObject });
-  return controller === null ? null : { mode: 'passive', controller };
-}
-
-export function stopPassiveCollectionOnNavigation(controller, pathname) {
-  if (pathname === '/feed/channels') return controller;
-  controller?.stop();
-  return null;
-}
-
 async function main({
   collectMarker = false,
   initialPathname = location.pathname,
@@ -511,7 +92,6 @@ async function main({
 
   let capture = null;
   let onNavigation = null;
-  let onStorageChange = null;
   let onRuntimeMessage = null;
   let lifeline = null;
   let tornDown = false;
@@ -526,11 +106,6 @@ async function main({
     try {
       if (onNavigation) {
         window.removeEventListener('yt-navigate-finish', onNavigation);
-      }
-    } catch {}
-    try {
-      if (onStorageChange) {
-        chrome.storage.onChanged.removeListener?.(onStorageChange);
       }
     } catch {}
     try {
@@ -554,27 +129,54 @@ async function main({
     }),
   });
 
+  client = createClient();
   filtering = createFilteringLifecycle({
     documentObject: document,
     nudgeObject: nudge,
     getConfig: () => config,
     getState: () => state,
     getPathname: () => location.pathname,
+    addBlockedChannel: client.block,
+    removeBlockedChannel: client.unblock,
   });
 
-  config = await loadConfig();
+  // One request brings settings and filter data; later changes are pushed.
+  applySnapshot(await client.getState());
   if (tornDown) return;
   capture = createSubscribeCapture({
     documentObject: document,
     getPathname: () => location.pathname,
     getEnabled: () => config.enabled,
-    addNames: addSubNames,
-    removeNames: removeSubNames,
+    addNames: client.addSubs,
+    removeNames: client.removeSubs,
     getCachedNames: () => state.subs,
   });
   capture.start();
-  const fetchedSubs = await refreshState();
-  if (tornDown) return;
+
+  // The collection throttle and the result live in the background; these
+  // adapters give the collection code the storage shape it expects.
+  const attemptStorage = {
+    async get() {
+      return {
+        [SUBS_REFRESH_ATTEMPTED_KEY]: await client.getCollectionAttempt(),
+      };
+    },
+    async set() {
+      await client.markCollectionAttempt();
+    },
+  };
+  const collectionOptions = {
+    requestCollection: (options) => requestSubscriptionCollection({
+      ...options,
+      storage: attemptStorage,
+      save: client.saveSubs,
+    }),
+    requestPassive: (options) => requestPassiveSubscriptionCollection({
+      ...options,
+      storage: attemptStorage,
+      save: client.saveSubs,
+    }),
+  };
 
   filtering.sync();
   recordCurrentVideo();
@@ -598,6 +200,7 @@ async function main({
 
     passiveAttempted = true;
     void startSubscriptionCollectionMode({
+      ...collectionOptions,
       pathname: location.pathname,
       collectMarker: false,
       cachedSubs: fetchedSubs,
@@ -632,30 +235,24 @@ async function main({
   };
   window.addEventListener('yt-navigate-finish', onNavigation);
 
-  onConfigChange((next) => {
-    if (tornDown) return;
-    config = next;
-    filtering.sync();
-  });
-
-  onStorageChange = async (changes, area) => {
-    try {
-      if (tornDown || !hasStateStorageChange(changes, area)) return;
-      await refreshState();
-      if (!tornDown) filtering.scan();
-    } catch {
-      // Storage refresh failures must not escape into the page.
-    }
-  };
-  chrome.storage.onChanged.addListener(onStorageChange);
-
   onRuntimeMessage = (message) => {
-    if (!tornDown && message?.type === 'rescan') filtering.scan();
+    if (tornDown) return;
+    try {
+      if (message?.type === 'rescan') {
+        filtering.scan();
+      } else if (message?.type === 'state') {
+        applySnapshot(message.state);
+        filtering.sync();
+      }
+    } catch {
+      // A bad push must not escape into the page.
+    }
   };
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
 
   if (collectMarker && initialPathname === '/feed/channels') {
     void startSubscriptionCollectionMode({
+      ...collectionOptions,
       pathname: initialPathname,
       collectMarker,
       cachedSubs: fetchedSubs,

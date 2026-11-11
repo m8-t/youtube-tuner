@@ -1,5 +1,7 @@
 import { DEFAULT_CONFIG } from '../rules/defaults.js';
 
+// Kept in storage.local since 2.0: storage.sync caps one item at 8 KB and
+// rate-limits writes, and the browsers this targets have no account sync.
 const KEY = 'config';
 
 function merge(defaults, stored) {
@@ -13,9 +15,13 @@ function merge(defaults, stored) {
   return out;
 }
 
+export function mergeConfig(stored) {
+  return merge(DEFAULT_CONFIG, stored);
+}
+
 export async function loadConfig() {
   try {
-    const got = await chrome.storage.sync.get(KEY);
+    const got = await chrome.storage.local.get(KEY);
     return merge(DEFAULT_CONFIG, got[KEY]);
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -23,12 +29,12 @@ export async function loadConfig() {
 }
 
 export async function saveConfig(config) {
-  await chrome.storage.sync.set({ [KEY]: config });
+  await chrome.storage.local.set({ [KEY]: config });
 }
 
 export function onConfigChange(callback) {
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && changes[KEY]) {
+    if (area === 'local' && changes[KEY]) {
       callback(merge(DEFAULT_CONFIG, changes[KEY].newValue));
     }
   });

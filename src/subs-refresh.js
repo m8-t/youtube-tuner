@@ -1,13 +1,18 @@
-import { saveSubs } from './storage/subs.js';
 import { extractSubscriptionNames } from './subs-scrape.js';
+import { SUBS_CONTINUATION_SELECTOR } from './dom/selectors.js';
+
+// This module runs in the content script, which has no storage access. The
+// caller supplies `storage` (the collection throttle) and `save`.
+async function saveUnavailable() {
+  throw new Error('no save function was supplied');
+}
 
 export const SUBS_REFRESH_ATTEMPTED_KEY = 'subsRefreshAttemptedAt';
 export const SUBS_REFRESH_RETRY_MS = 60 * 60 * 1000;
 export const SUBS_SCRAPE_BUDGET_MS = 90 * 1000;
 export const SUBS_SCRAPE_INTERVAL_MS = 1000;
 export const SUBS_STABLE_ATTEMPTS = 3;
-export const SUBS_CONTINUATION_SELECTOR =
-  'ytd-continuation-item-renderer';
+export { SUBS_CONTINUATION_SELECTOR };
 
 const EMPTY_DIAGNOSTICS = {
   finalNameCount: 0,
@@ -297,7 +302,7 @@ export async function collectSubscriptions({
 
 export async function saveCompleteSubscriptionResult(
   result,
-  save = saveSubs,
+  save = saveUnavailable,
 ) {
   if (
     result?.complete !== true ||
@@ -330,11 +335,11 @@ async function claimCollectionAttempt({
 }
 
 export async function requestSubscriptionCollection({
-  storage = chrome.storage.local,
+  storage,
   now = Date.now(),
   force = false,
   collect = collectSubscriptions,
-  save = saveSubs,
+  save = saveUnavailable,
 } = {}) {
   if (!(await claimCollectionAttempt({ storage, now, force }))) {
     return {
@@ -364,7 +369,7 @@ export function observeSubscriptionList({
   MutationObserverObject =
     documentObject?.defaultView?.MutationObserver ??
     globalThis.MutationObserver,
-  save = saveSubs,
+  save = saveUnavailable,
   onComplete = () => {},
   onError = (error) => warnFailure('passive-collection-failed', error),
 } = {}) {
@@ -476,7 +481,7 @@ export function observeSubscriptionList({
 }
 
 export async function requestPassiveSubscriptionCollection({
-  storage = chrome.storage.local,
+  storage,
   now = Date.now(),
   observe = observeSubscriptionList,
   ...observeOptions

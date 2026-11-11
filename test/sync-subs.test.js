@@ -26,8 +26,8 @@ function copy(value) {
   return structuredClone(value);
 }
 
-function fakeStorage({ sync = {}, local = {} } = {}) {
-  const values = { sync: copy(sync), local: copy(local) };
+function fakeStorage({ settings = {}, local = {} } = {}) {
+  const values = { local: { ...copy(settings), ...copy(local) } };
   const area = (name) => ({
     async get(keys) {
       if (keys === null || keys === undefined) return copy(values[name]);
@@ -46,7 +46,7 @@ function fakeStorage({ sync = {}, local = {} } = {}) {
       }
     },
   });
-  return { sync: area('sync'), local: area('local'), values };
+  return { local: area('local'), values };
 }
 
 function sharedBackend() {
@@ -72,7 +72,7 @@ const KEY = await deriveKey('passphrase', new Uint8Array(32), 1000);
 
 function device({ backend, clock, enabled = true, subs, extraLocal = {} }) {
   const storage = fakeStorage({
-    sync: {
+    settings: {
       config: { ...copy(DEFAULT_CONFIG), subsSync: { enabled } },
       channelOverrides: {},
     },
@@ -262,7 +262,7 @@ test('bootstrap merge demotes local subs clocks and takes the larger fetchedAt',
   const clock = { time: NOW };
   const d = device({ backend, clock, subs: entry(['Local'], 9000) });
   const remote = storageToDoc(
-    d.storage.values.sync.config,
+    d.storage.values.local.config,
     {},
     [],
     [],

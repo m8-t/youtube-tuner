@@ -1,4 +1,5 @@
 import { loadConfig, saveConfig } from './storage/config.js';
+import { ensureStorageLayout } from './storage/migrate.js';
 import { loadSubsMeta } from './storage/subs.js';
 import { friendlySyncError } from './sync/friendly-errors.js';
 import {
@@ -436,7 +437,7 @@ export async function initializePopup({
 }
 
 if (typeof document !== 'undefined') {
-  initializePopup().catch((error) => {
+  ensureStorageLayout().then(() => initializePopup()).catch((error) => {
     console.error('[youtube-tuner] popup setup failed', error);
   });
 }

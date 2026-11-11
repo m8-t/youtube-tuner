@@ -9,6 +9,7 @@ import {
 import { BLOCK_TOAST_CLASS } from './block-toast.js';
 import { COLLAPSED_SECTION_CLASS } from './empty-sections.js';
 import { MENU_CLOAK_CLASS } from './native-menu.js';
+import { MENU_DROPDOWN_SELECTOR } from './selectors.js';
 
 export function injectStyles(doc) {
   if (doc.getElementById('ytt-styles')) return;
@@ -17,7 +18,7 @@ export function injectStyles(doc) {
   style.textContent = `
     .${HIDDEN_CLASS} { display: none !important; }
     .${COLLAPSED_SECTION_CLASS} { display: none !important; }
-    .${MENU_CLOAK_CLASS} tp-yt-iron-dropdown {
+    .${MENU_CLOAK_CLASS} ${MENU_DROPDOWN_SELECTOR} {
       opacity: 0 !important;
       pointer-events: none !important;
     }

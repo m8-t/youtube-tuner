@@ -1,8 +1,15 @@
 import { loadConfig, onConfigChange } from './storage/config.js';
-import { loadSubs, loadSubsMeta } from './storage/subs.js';
+import { loadSubsMeta } from './storage/subs.js';
 import { createSyncEngine } from './sync/engine.js';
 import * as syncKeyStore from './sync/key-store.js';
 import { createMigratedPrivateStore } from './sync/private-store.js';
+import { ensureStorageLayout } from './storage/migrate.js';
+import {
+  createContentApi,
+  createStateBroadcaster,
+  lockStorageToTrustedContexts,
+} from './background/content-api.js';
+import { createSerialQueue } from './background/serial.js';
 import { createWebdavBackend } from './sync/webdav.js';
 import {
   UPDATE_CHECK_COMPLETE_MESSAGE,
@@ -205,12 +212,6 @@ export function createSubscriptionTabCoordinator({
   };
 }
 
-export async function refreshSubs({ force = false } = {}) {
-  if (force) return null;
-  const cached = await loadSubs();
-  return cached === null ? null : cached.size;
-}
-
 export function subscriptionListTitle(meta) {
   if (meta === null) {
     return 'youtube-tuner — subscription list not collected yet - click to collect';
@@ -358,6 +359,15 @@ export const MESSAGE_ACCESS = Object.freeze({
   [UPDATE_CHECK_COMPLETE_MESSAGE]: 'extension',
   counts: 'content',
   [SUBS_COLLECTION_RESULT_MESSAGE]: 'content',
+  'state-get': 'content',
+  'watched-add': 'content',
+  'block-add': 'content',
+  'block-remove': 'content',
+  'subs-add': 'content',
+  'subs-remove': 'content',
+  'subs-attempt-get': 'content',
+  'subs-attempt-set': 'content',
+  'subs-save': 'content',
 });
 
 function isExtensionPage(sender, runtime) {
@@ -450,11 +460,16 @@ const privateStore = createMigratedPrivateStore({
   onError: (error) => warnRefreshFailure('sync-state-migration-failed', error),
 });
 
+// One queue for every read-modify-write on filter data: requests from tabs
+// and the sync engine's own capture and projection.
+const enqueueWrite = createSerialQueue();
+
 const syncEngine = createSyncEngine({
   storage: chrome.storage,
   backendFactory: createWebdavBackend,
   keyStore: syncKeyStore,
   privateStorage: privateStore,
+  lock: enqueueWrite,
 });
 
 function syncFailure(error) {
@@ -480,18 +495,23 @@ export async function ensureSyncPullAlarm({
   return true;
 }
 
+const SYNCED_STORAGE_KEYS = [
+  'config',
+  'channelOverrides',
+  'blocklist',
+  'manualSubs',
+  'subs',
+  'watched',
+];
+
 export function createSyncStorageChangeHandler({
   storage = chrome.storage,
   privateStorage = storage.local,
   alarms = chrome.alarms,
 } = {}) {
   return async function handleSyncStorageChange(changes, area) {
-    const keys = area === 'sync'
-      ? ['config', 'channelOverrides']
-      : area === 'local'
-        ? ['blocklist', 'manualSubs', 'subs', 'watched']
-        : [];
-    if (!keys.some((key) => changes[key])) return false;
+    if (area !== 'local') return false;
+    if (!SYNCED_STORAGE_KEYS.some((key) => changes[key])) return false;
 
     const stored = await privateStorage.get(['syncSettings', 'syncMeta']);
     if (stored.syncSettings?.enabled !== true) return false;
@@ -565,7 +585,7 @@ export function createSyncMessageHandler({
     } else if (message?.type === 'sync-disable') {
       operation = () => engine.disable();
     } else if (message?.type === 'sync-run') {
-      operation = () => engine.runSync({ force: true });
+      operation = () => engine.runSync();
     } else {
       return undefined;
     }
@@ -585,6 +605,12 @@ const domHealthState = createDomHealthState();
 const handleCountsMessage = createCountsMessageHandler({ domHealthState });
 const handleSyncMessage = createSyncMessageHandler();
 const startSyncPull = () => syncEngine.runSync();
+
+const stateBroadcaster = createStateBroadcaster();
+const handleContentMessage = createContentApi({ enqueue: enqueueWrite });
+
+void lockStorageToTrustedContexts();
+void ensureStorageLayout();
 
 chrome.action.setPopup({ popup: POPUP_PATH });
 chrome.alarms.create(SUBS_ALARM, { periodInMinutes: 1440 });
@@ -613,6 +639,7 @@ onConfigChange(() => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  stateBroadcaster.onStorageChanged(changes, area);
   void handleSyncStorageChange(changes, area).catch((error) => {
     warnRefreshFailure('sync-change-schedule-failed', error);
   });
@@ -626,6 +653,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onMessage.addListener(guardMessages(handleSyncMessage));
 
 chrome.runtime.onMessage.addListener(guardMessages(handleCountsMessage));
+
+chrome.runtime.onMessage.addListener(guardMessages(handleContentMessage));
 
 chrome.runtime.onMessage.addListener(guardMessages((message, sender, sendResponse) => {
   if (message?.type === UPDATE_CHECK_COMPLETE_MESSAGE) {
