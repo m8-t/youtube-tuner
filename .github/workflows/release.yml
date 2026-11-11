@@ -5,15 +5,22 @@ on:
     tags:
       - "v*"
 
+# Three jobs so that the permanent CRX signing key never shares a job with
+# third-party code: build runs npm and esbuild without secrets, sign runs only
+# Node built-ins with the key, release holds the write token.
+permissions: {}
+
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
           cache: npm
@@ -21,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -e
-          npm ci
+          npm ci --ignore-scripts
 
       - name: Test
         run: |
@@ -107,37 +114,24 @@ jobs:
             exit 1
           fi
 
-      - name: Configure CRX signing key
-        env:
-          YTT_CRX_KEY_PEM: ${{ secrets.YTT_CRX_KEY_PEM }}
+      - name: Build package
         run: |
           set -e
-          umask 077
-          printf '%s' "$YTT_CRX_KEY_PEM" > "$RUNNER_TEMP/key.pem"
-          printf 'YTT_CRX_KEY=%s\n' "$RUNNER_TEMP/key.pem" >> "$GITHUB_ENV"
+          npm run package
 
-      - name: Build signed CRX
-        run: |
-          set -e
-          npm run crx
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract release notes
         run: |
           set -e
           TAG=${GITHUB_REF#refs/tags/}
           TAG_VERSION=${TAG#v}
           CHANGELOG_VERSION=$TAG_VERSION
-          PRERELEASE=()
           case "$TAG" in
             v*-beta.*)
-              PRERELEASE=(--prerelease)
               CHANGELOG_VERSION=$(printf '%s' "$TAG_VERSION" |
                 sed 's/-beta\.[0-9][0-9]*$//')
               ;;
           esac
-          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          NOTES_FILE="release-notes.md"
           if awk -v version="$CHANGELOG_VERSION" '
             BEGIN {
               heading = "## [" version "] - "
@@ -169,7 +163,7 @@ jobs:
               if (!started) exit 2
             }
           ' CHANGELOG.md > "$NOTES_FILE"; then
-            NOTES=(--notes-file "$NOTES_FILE")
+            echo "Release notes taken from CHANGELOG.md."
           else
             EXTRACTION_STATUS=$?
             case "$TAG" in
@@ -182,7 +176,7 @@ jobs:
                     "$TAG" >&2
                 fi
                 printf 'falling back to generated notes.\n' >&2
-                NOTES=(--generate-notes)
+                rm -f "$NOTES_FILE"
                 ;;
               *)
                 if [ "$EXTRACTION_STATUS" -eq 2 ]; then
@@ -198,5 +192,98 @@ jobs:
                 ;;
             esac
           fi
-          gh release create "$TAG" youtube-tuner-*.zip youtube-tuner-*.crx \
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package
+          if-no-files-found: error
+          path: |
+            youtube-tuner-*.zip
+            release-notes.md
+
+  sign:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+
+      # No npm install in this job: tools/crx.mjs needs only Node built-ins,
+      # so nothing from node_modules ever runs next to the key.
+      - name: Sign CRX
+        env:
+          YTT_CRX_KEY_PEM: ${{ secrets.YTT_CRX_KEY_PEM }}
+        run: |
+          set -e
+          umask 077
+          KEY_FILE="$RUNNER_TEMP/key.pem"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$YTT_CRX_KEY_PEM" > "$KEY_FILE"
+          YTT_CRX_KEY="$KEY_FILE" node tools/crx.mjs
+
+      - name: Write checksums
+        run: |
+          set -e
+          sha256sum youtube-tuner-*.zip youtube-tuner-*.crx > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed
+          if-no-files-found: error
+          path: |
+            youtube-tuner-*.crx
+            SHA256SUMS
+
+  release:
+    needs: [build, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release
+          merge-multiple: true
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            release/youtube-tuner-*.zip
+            release/youtube-tuner-*.crx
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          TAG=${GITHUB_REF#refs/tags/}
+          PRERELEASE=()
+          case "$TAG" in
+            v*-beta.*)
+              PRERELEASE=(--prerelease)
+              ;;
+          esac
+          if [ -f release/release-notes.md ]; then
+            NOTES=(--notes-file release/release-notes.md)
+          else
+            NOTES=(--generate-notes)
+          fi
+          gh release create "$TAG" \
+            release/youtube-tuner-*.zip release/youtube-tuner-*.crx \
+            release/SHA256SUMS \
             --title "Release $TAG" "${NOTES[@]}" "${PRERELEASE[@]}"
