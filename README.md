@@ -239,7 +239,8 @@ Use this procedure on the first device:
    The URL must end with a file name. The file does not have to exist; the
    extension creates it. A folder URL causes an HTTP error such as 403. The
    folders in the path must already exist.
-4. Enter the username, the app password, and a new passphrase.
+4. Enter the username, the app password, and a new passphrase. A new
+   passphrase must have a minimum of 12 characters.
 5. Select **Test connection**. The browser asks for permission for this
    server. The test writes and deletes a probe file and reports if the
    server supports safe concurrent writes. If the test fails, sync will not
@@ -263,7 +264,8 @@ one device wins over an old entry on another device. A device that is
 offline for more than 90 days can bring a deleted entry back.
 
 **Disable sync** removes the server settings, the encryption key, and the
-sync state from the device. The local filter data stays. The settings export
+sync state from the device. It also gives back the permission for the server.
+The local filter data stays. The settings export
 never contains the sync credentials or the sync state.
 
 ### Tile controls
@@ -315,10 +317,13 @@ optional sync: encrypted uploads to the WebDAV server that you configure
 yourself. Both are off unless you turn them on (the update check is on by
 default; the sync is off by default).
 
-The manifest requests `storage`, `alarms`, and access to `youtube.com`. The
-sync feature asks for permission for your own WebDAV server only when you
-enable it. The extension requests no other permissions. The update check needs no extra
-permission because the GitHub API permits cross-origin requests.
+The manifest requests `storage`, `alarms`, `scripting`, and access to
+`https://www.youtube.com`. The extension uses `scripting` only to attach again
+to open YouTube tabs after an update. The sync feature asks for permission for
+your own WebDAV server only when you enable it, and gives the permission back
+when you disable sync. The extension requests no other permissions. The update
+check needs no extra permission because the GitHub API permits cross-origin
+requests.
 
 The text-dependent features have code for English and German. Live captures
 verified the German interface and the English watch-page sidebar. The English
@@ -347,8 +352,12 @@ blocklist rule can still hide the video.
 | Subscription cache and collection times | `local` |
 | Per-channel rule overrides | `sync` |
 | Update check time and newest release tag | `local` |
-| Sync document, sync state, and WebDAV settings | `local` |
+| Sync document, sync state, and WebDAV settings | IndexedDB |
 | Sync encryption key (non-extractable) | IndexedDB |
+
+The page script of YouTube cannot read the IndexedDB of the extension. The
+extension keeps the WebDAV password there for this reason. The options page
+does not show a saved password again.
 
 The watched set contains a maximum of 5000 video IDs. If a new ID exceeds this
 limit, the extension removes the oldest ID.
@@ -426,9 +435,18 @@ changes the extension ID.
 After you install a new build, reload each open YouTube tab. Old content scripts
 stay active until you reload the tab.
 
-Push a tag in the form `v<version>` to create a release. The workflow runs the
-tests, checks the manifest version, builds both release files, and creates the
-GitHub release.
+Push a tag in the form `v<version>` to create a release. The workflow has
+three jobs. The build job runs the tests, checks the manifest version, and
+builds the ZIP file. It has no secrets. The sign job creates the CRX file. It
+has the signing key, but it does not install or run npm packages. The release
+job creates the GitHub release.
+
+Each release has a `SHA256SUMS` file and a build provenance attestation. To
+verify a downloaded file, use this command:
+
+```
+gh attestation verify youtube-tuner-<version>.zip --repo m8-t/youtube-tuner
+```
 
 ## License
 

@@ -14,6 +14,7 @@ import {
   setupOverridesEditor,
 } from '../src/options.js';
 import { SUBS_SCRAPE_BUDGET_MS } from '../src/subs-refresh.js';
+import { DEFAULT_CONFIG } from '../src/rules/defaults.js';
 import {
   SUBS_FORMAT_VERSION,
   SUBS_STALE_AFTER_MS,
@@ -419,7 +420,11 @@ test('valid settings import replaces both areas and reports imported counts', as
   assert.equal(result, true);
   assert.match(confirmationText, /replace the existing settings/i);
   assert.deepEqual(harness.mock.areas.local, imported.local);
-  assert.deepEqual(harness.mock.areas.sync, imported.sync);
+  // A partial config is completed from the defaults; unknown keys go.
+  assert.deepEqual(harness.mock.areas.sync, {
+    config: { ...structuredClone(DEFAULT_CONFIG), enabled: false },
+    channelOverrides: imported.sync.channelOverrides,
+  });
   assert.equal(rendered, true);
   assert.equal(
     harness.statusElement.textContent,
@@ -456,7 +461,7 @@ test('settings import normalizes channel overrides and drops junk', async () => 
     renderResult: async () => {},
   }), true);
   assert.deepEqual(harness.mock.areas.sync, {
-    config: { enabled: true },
+    config: structuredClone(DEFAULT_CONFIG),
     channelOverrides: {
       'Channel A': {
         watched: { enabled: false },
@@ -988,4 +993,70 @@ test('options loads and saves the subscription sync checkbox', async (t) => {
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(mock.areas.sync.config.subsSync.enabled, false);
+});
+
+test('settings import keeps only known keys with valid values', async () => {
+  const harness = settingsHarness();
+  const imported = {
+    format: 1,
+    local: {
+      blocklist: ['Good', 42, '   ', 'x'.repeat(500)],
+      watched: ['abcdefghijk', '<script>', 7],
+      updateCheck: { lastCheckedAt: 5, latestTag: 'javascript:alert(1)' },
+      subs: { format: 2, ids: 'not-a-list', fetchedAt: 1 },
+      evilKey: { anything: true },
+    },
+    sync: {
+      config: {
+        enabled: 'yes',
+        ageRule: { enabled: true, maxAgeDays: -5, minAgeHours: 'NaN' },
+        titleRule: { enabled: true, patterns: ['spam', 9, ' spam '] },
+        injected: { key: 1 },
+      },
+      unknownSyncKey: 1,
+    },
+  };
+
+  assert.equal(await importSettings({
+    ...harness,
+    file: { text: async () => JSON.stringify(imported) },
+    confirmFn: () => true,
+    renderResult: async () => {},
+  }), true);
+
+  assert.deepEqual(harness.mock.areas.local, {
+    blocklist: ['Good'],
+    watched: ['abcdefghijk'],
+    updateCheck: { lastCheckedAt: 5 },
+  });
+  assert.deepEqual(harness.mock.areas.sync.config, {
+    ...structuredClone(DEFAULT_CONFIG),
+    titleRule: { enabled: true, patterns: ['spam'] },
+  });
+  assert.equal(Object.hasOwn(harness.mock.areas.sync, 'unknownSyncKey'), false);
+  assert.match(harness.statusElement.textContent, /Ignored unknown or invalid entries: subs, evilKey, unknownSyncKey\./);
+});
+
+test('settings import warns before a file turns on account feedback', async () => {
+  const harness = settingsHarness();
+  let confirmationText = '';
+
+  assert.equal(await importSettings({
+    ...harness,
+    file: {
+      text: async () => JSON.stringify({
+        format: 1,
+        sync: { config: { blocklistRule: { sendNativeFeedback: true } } },
+      }),
+    },
+    confirmFn(message) {
+      confirmationText = message;
+      return false;
+    },
+    renderResult: async () => {},
+  }), false);
+
+  assert.match(confirmationText, /WARNING/);
+  assert.match(confirmationText, /Google account/);
+  assert.deepEqual(harness.mock.areas.sync, {});
 });

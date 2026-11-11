@@ -2,6 +2,7 @@ import { loadConfig, onConfigChange } from './storage/config.js';
 import { loadSubs, loadSubsMeta } from './storage/subs.js';
 import { createSyncEngine } from './sync/engine.js';
 import * as syncKeyStore from './sync/key-store.js';
+import { createMigratedPrivateStore } from './sync/private-store.js';
 import { createWebdavBackend } from './sync/webdav.js';
 import {
   UPDATE_CHECK_COMPLETE_MESSAGE,
@@ -341,6 +342,74 @@ export async function refreshSubscriptionIndicators({
   return meta;
 }
 
+const YOUTUBE_ORIGIN = 'https://www.youtube.com';
+
+// Who may send which message. Content scripts run inside the YouTube renderer
+// and are the less trusted side: they may report, never configure.
+export const MESSAGE_ACCESS = Object.freeze({
+  'sync-status': 'extension',
+  'sync-test': 'extension',
+  'sync-enable': 'extension',
+  'sync-disable': 'extension',
+  'sync-run': 'extension',
+  'get-counts': 'extension',
+  'refresh-subs': 'extension',
+  [CANCEL_SUBS_REFRESH_MESSAGE]: 'extension',
+  [UPDATE_CHECK_COMPLETE_MESSAGE]: 'extension',
+  counts: 'content',
+  [SUBS_COLLECTION_RESULT_MESSAGE]: 'content',
+});
+
+function isExtensionPage(sender, runtime) {
+  // Compared as strings: URL.origin is not defined the same way for the
+  // chrome-extension scheme everywhere.
+  const base = runtime.getURL('');
+  if (typeof base !== 'string' || !base.endsWith('/')) return false;
+  if (typeof sender.url === 'string') return sender.url.startsWith(base);
+  return typeof sender.origin === 'string' && `${sender.origin}/` === base;
+}
+
+function isYouTubeTopFrame(sender) {
+  let origin = sender.origin;
+  if (typeof origin !== 'string' || origin.length === 0) {
+    try {
+      origin = new URL(sender.url).origin;
+    } catch {
+      return false;
+    }
+  }
+  return origin === YOUTUBE_ORIGIN
+    && Number.isInteger(sender.tab?.id)
+    && (sender.frameId === undefined || sender.frameId === 0);
+}
+
+export function senderKind(sender, { runtime = chrome.runtime } = {}) {
+  try {
+    if (!sender || sender.id !== runtime.id) return 'unknown';
+    if (isExtensionPage(sender, runtime)) return 'extension';
+    if (isYouTubeTopFrame(sender)) return 'content';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+// Drops any message whose type is unknown or whose sender is not the kind
+// that type is reserved for.
+export function guardMessages(handler, {
+  access = MESSAGE_ACCESS,
+  kindOf = senderKind,
+} = {}) {
+  return function guardedHandler(message, sender, sendResponse) {
+    const type = message?.type;
+    if (typeof type !== 'string' || !Object.hasOwn(access, type)) {
+      return undefined;
+    }
+    if (kindOf(sender) !== access[type]) return undefined;
+    return handler(message, sender, sendResponse);
+  };
+}
+
 const subscriptionTabs = createSubscriptionTabCoordinator();
 
 function startSubscriptionRefresh() {
@@ -376,10 +445,16 @@ export function createUpdateCheckRunner({
 
 const startUpdateCheck = createUpdateCheckRunner();
 
+const privateStore = createMigratedPrivateStore({
+  legacyArea: chrome.storage.local,
+  onError: (error) => warnRefreshFailure('sync-state-migration-failed', error),
+});
+
 const syncEngine = createSyncEngine({
   storage: chrome.storage,
   backendFactory: createWebdavBackend,
   keyStore: syncKeyStore,
+  privateStorage: privateStore,
 });
 
 function syncFailure(error) {
@@ -407,6 +482,7 @@ export async function ensureSyncPullAlarm({
 
 export function createSyncStorageChangeHandler({
   storage = chrome.storage,
+  privateStorage = storage.local,
   alarms = chrome.alarms,
 } = {}) {
   return async function handleSyncStorageChange(changes, area) {
@@ -417,7 +493,7 @@ export function createSyncStorageChangeHandler({
         : [];
     if (!keys.some((key) => changes[key])) return false;
 
-    const stored = await storage.local.get(['syncSettings', 'syncMeta']);
+    const stored = await privateStorage.get(['syncSettings', 'syncMeta']);
     if (stored.syncSettings?.enabled !== true) return false;
     const meta = {
       revision: null,
@@ -429,7 +505,7 @@ export function createSyncStorageChangeHandler({
         : {}),
     };
     if (!meta.dirty) {
-      await storage.local.set({
+      await privateStorage.set({
         syncMeta: { ...meta, dirty: true },
       });
     }
@@ -445,7 +521,7 @@ export function createSyncStorageChangeHandler({
 
 export function createSyncMessageHandler({
   engine = syncEngine,
-  backendFactory = createWebdavBackend,
+  backendFactory = null,
   getDomHealth = () => domHealthState.active(),
 } = {}) {
   function capabilitiesFailure(error) {
@@ -472,7 +548,11 @@ export function createSyncMessageHandler({
     } else if (message?.type === 'sync-test') {
       operation = async () => {
         try {
-          return await backendFactory(message.settings ?? {}).test();
+          // An injected factory is the test seam; production goes through
+          // the engine so a saved password can be reused.
+          return backendFactory !== null
+            ? await backendFactory(message.settings ?? {}).test()
+            : await engine.testConnection(message.settings ?? {});
         } catch (error) {
           return capabilitiesFailure(error);
         }
@@ -498,7 +578,9 @@ export function createSyncMessageHandler({
   };
 }
 
-const handleSyncStorageChange = createSyncStorageChangeHandler();
+const handleSyncStorageChange = createSyncStorageChangeHandler({
+  privateStorage: privateStore,
+});
 const domHealthState = createDomHealthState();
 const handleCountsMessage = createCountsMessageHandler({ domHealthState });
 const handleSyncMessage = createSyncMessageHandler();
@@ -541,11 +623,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   domHealthState.remove(tabId);
 });
 
-chrome.runtime.onMessage.addListener(handleSyncMessage);
+chrome.runtime.onMessage.addListener(guardMessages(handleSyncMessage));
 
-chrome.runtime.onMessage.addListener(handleCountsMessage);
+chrome.runtime.onMessage.addListener(guardMessages(handleCountsMessage));
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(guardMessages((message, sender, sendResponse) => {
   if (message?.type === UPDATE_CHECK_COMPLETE_MESSAGE) {
     void startSubscriptionRefresh();
     return;
@@ -561,4 +643,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === CANCEL_SUBS_REFRESH_MESSAGE) {
     void subscriptionTabs.cancel();
   }
-});
+}));

@@ -3,6 +3,37 @@
 Notable changes per release. Older releases are documented on the
 [releases page](https://github.com/m8-t/youtube-tuner/releases).
 
+## [1.7.1] - 2026-11-11
+
+Security release. No change to filtering.
+
+### Security
+
+- The WebDAV URL, username and app password, the sync document and the sync
+  state moved from `chrome.storage.local` to the extension's own IndexedDB.
+  Content scripts can read `chrome.storage` by default, so a compromised
+  YouTube page process could have read the app password. The move happens
+  once, automatically, on the first start. The options page no longer shows a
+  saved app password; type it again only to test or change it.
+- The background worker now checks who sent a message. Sync and refresh
+  messages are accepted from the extension's own pages only. Before, the
+  content script could have re-pointed sync at another server.
+- Settings import validates every key and value and ignores the rest. It
+  warns before a file turns on a setting that sends feedback to your Google
+  account.
+- A new sync file needs a passphrase of at least 12 characters. A remote file
+  that asks for fewer than 600000 PBKDF2 iterations is refused.
+- "Disable sync" gives the WebDAV host permission back.
+- The manifest asks for `https://www.youtube.com` only, not every YouTube
+  subdomain, and sets an explicit content security policy.
+
+### Changed
+
+- Release builds are split into build, sign and release jobs. The CRX signing
+  key is no longer in the same job as `npm ci` and the bundler. Actions are
+  pinned to commit hashes. Each release has a `SHA256SUMS` file and a build
+  provenance attestation.
+
 ## [1.7.0] - 2026-10-26
 
 ### Added

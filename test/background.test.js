@@ -611,3 +611,67 @@ test('collection results from any other tab are ignored', async () => {
   assert.deepEqual(harness.calls.remove, []);
   assert.equal(coordinator.getCollectTabId(), 40);
 });
+
+const { MESSAGE_ACCESS, guardMessages, senderKind } =
+  await import('../src/background.js');
+
+const EXTENSION_ID = 'youtube-tuner-test-extension';
+const optionsSender = {
+  id: EXTENSION_ID,
+  url: `chrome-extension://${EXTENSION_ID}/options.html`,
+  origin: `chrome-extension://${EXTENSION_ID}`,
+  tab: { id: 7 },
+};
+const popupSender = {
+  id: EXTENSION_ID,
+  url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+};
+const contentSender = {
+  id: EXTENSION_ID,
+  url: 'https://www.youtube.com/watch?v=abcdefghijk',
+  origin: 'https://www.youtube.com',
+  frameId: 0,
+  tab: { id: 3 },
+};
+
+test('sender kinds separate extension pages from the YouTube content script', () => {
+  assert.equal(senderKind(optionsSender), 'extension');
+  assert.equal(senderKind(popupSender), 'extension');
+  assert.equal(senderKind(contentSender), 'content');
+  assert.equal(senderKind({ ...contentSender, frameId: 4 }), 'unknown');
+  assert.equal(
+    senderKind({ ...contentSender, origin: 'https://evil.example' }),
+    'unknown',
+  );
+  assert.equal(senderKind({ ...optionsSender, id: 'other-extension' }), 'unknown');
+  assert.equal(senderKind(undefined), 'unknown');
+});
+
+test('the content script cannot reach any sync or refresh message', () => {
+  const calls = [];
+  const guarded = guardMessages((message) => {
+    calls.push(message.type);
+    return true;
+  });
+
+  for (const type of [
+    'sync-enable',
+    'sync-disable',
+    'sync-test',
+    'sync-run',
+    'sync-status',
+    'refresh-subs',
+    'cancel-subs-refresh',
+    'get-counts',
+  ]) {
+    assert.equal(MESSAGE_ACCESS[type], 'extension');
+    assert.equal(guarded({ type }, contentSender, () => {}), undefined);
+  }
+  assert.deepEqual(calls, []);
+
+  assert.equal(guarded({ type: 'sync-enable' }, optionsSender, () => {}), true);
+  assert.equal(guarded({ type: 'counts' }, contentSender, () => {}), true);
+  assert.equal(guarded({ type: 'counts' }, optionsSender, () => {}), undefined);
+  assert.equal(guarded({ type: 'not-a-message' }, optionsSender, () => {}), undefined);
+  assert.equal(guarded({ type: 'constructor' }, optionsSender, () => {}), undefined);
+});

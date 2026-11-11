@@ -110,6 +110,9 @@ export function installChromeMock({ install = true } = {}) {
       getManifest() {
         return { version: '0.7.0' };
       },
+      getURL(path = '') {
+        return `chrome-extension://youtube-tuner-test-extension/${path}`;
+      },
       onConnect: makeEvent('connected'),
       onInstalled: makeEvent('installed'),
       onMessage: makeEvent('message'),

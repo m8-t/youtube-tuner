@@ -1,11 +1,7 @@
 import { loadConfig, saveConfig } from './storage/config.js';
 import { loadBlocklist, removeBlocked } from './storage/blocklist.js';
 import { loadWatched, clearWatched } from './storage/watched.js';
-import {
-  loadOverrides,
-  normalizeOverrides,
-  saveOverrides,
-} from './storage/overrides.js';
+import { loadOverrides, saveOverrides } from './storage/overrides.js';
 import {
   loadSubs,
   loadSubsMeta,
@@ -15,6 +11,11 @@ import {
 } from './storage/subs.js';
 import { SUBS_SCRAPE_BUDGET_MS } from './subs-refresh.js';
 import { friendlySyncError } from './sync/friendly-errors.js';
+import {
+  accountFeedbackFlags,
+  cleanLocalArea,
+  cleanSyncArea,
+} from './storage/schema.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -421,13 +422,14 @@ export function renderSyncStatus(status = {}, settings = {}) {
     typeof configuredSettings.username === 'string'
       ? configuredSettings.username
       : '';
-  el('sync-password').value =
-    typeof configuredSettings.password === 'string'
-      ? configuredSettings.password
-      : '';
+  // The saved app password is never read back into the page.
+  el('sync-password').value = '';
   el('sync-passphrase').value = '';
 
   const enabled = status.enabled === true;
+  el('sync-password').placeholder = enabled
+    ? 'saved - type it again only to test or change it'
+    : '';
   el('sync-enable').hidden = enabled;
   el('sync-enable').disabled = enabled;
   el('sync-disable').hidden = !enabled;
@@ -451,14 +453,12 @@ export function renderSyncStatus(status = {}, settings = {}) {
 
 export async function refreshSyncStatus({
   sendMessage = (message) => chrome.runtime.sendMessage(message),
-  localStorage = chrome.storage.local,
 } = {}) {
-  const [status, stored] = await Promise.all([
-    sendMessage({ type: 'sync-status' }),
-    localStorage.get('syncSettings'),
-  ]);
-  const settings = stored.syncSettings || status?.settings || {};
-  renderSyncStatus(status, settings);
+  const status = await sendMessage({ type: 'sync-status' });
+  renderSyncStatus(status, {
+    url: status?.url,
+    username: status?.username,
+  });
   return status;
 }
 
@@ -538,7 +538,6 @@ export async function enableSync({
   requestPermission =
     (request) => chrome.permissions.request(request),
   sendMessage = (message) => chrome.runtime.sendMessage(message),
-  localStorage = chrome.storage.local,
 } = {}) {
   button.disabled = true;
   let enabled = false;
@@ -565,7 +564,7 @@ export async function enableSync({
     button.disabled = false;
     if (enabled) {
       try {
-        await refreshSyncStatus({ sendMessage, localStorage });
+        await refreshSyncStatus({ sendMessage });
       } catch (error) {
         el('sync-message').textContent =
           `Status refresh failed: ${errorMessage(error)}`;
@@ -574,16 +573,32 @@ export async function enableSync({
   }
 }
 
+// Gives the WebDAV host permission back once sync no longer needs it.
+async function releaseSyncPermission(url, removePermission) {
+  try {
+    const { origin } = validateSyncUrl(url);
+    if (new URL(url).hostname.endsWith('youtube.com')) return false;
+    return await removePermission({ origins: [origin] });
+  } catch {
+    return false;
+  }
+}
+
 export async function disableSync({
   button = el('sync-disable'),
   sendMessage = (message) => chrome.runtime.sendMessage(message),
-  localStorage = chrome.storage.local,
+  removePermission = (request) => chrome.permissions.remove(request),
 } = {}) {
   button.disabled = true;
   let disabled = false;
   try {
+    let configuredUrl = '';
+    try {
+      configuredUrl = (await sendMessage({ type: 'sync-status' }))?.url ?? '';
+    } catch {}
     const response = await sendMessage({ type: 'sync-disable' });
     if (response?.error) throw new Error(errorMessage(response.error));
+    await releaseSyncPermission(configuredUrl, removePermission);
     el('sync-message').textContent = 'Sync disabled.';
     disabled = true;
     return true;
@@ -595,7 +610,7 @@ export async function disableSync({
     button.disabled = false;
     if (disabled) {
       try {
-        await refreshSyncStatus({ sendMessage, localStorage });
+        await refreshSyncStatus({ sendMessage });
       } catch (error) {
         el('sync-message').textContent =
           `Status refresh failed: ${errorMessage(error)}`;
@@ -629,23 +644,23 @@ export async function setupSyncControls({
   requestPermission =
     (request) => chrome.permissions.request(request),
   sendMessage = (message) => chrome.runtime.sendMessage(message),
-  localStorage = chrome.storage.local,
+  removePermission = (request) => chrome.permissions.remove(request),
 } = {}) {
   el('sync-test').addEventListener('click', async () => {
     await testSyncConnection({ requestPermission, sendMessage });
   });
   el('sync-enable').addEventListener('click', async () => {
-    await enableSync({ requestPermission, sendMessage, localStorage });
+    await enableSync({ requestPermission, sendMessage });
   });
   el('sync-disable').addEventListener('click', async () => {
-    await disableSync({ sendMessage, localStorage });
+    await disableSync({ sendMessage, removePermission });
   });
   el('sync-run').addEventListener('click', async () => {
     await runSyncNow({ sendMessage });
   });
 
   try {
-    return await refreshSyncStatus({ sendMessage, localStorage });
+    return await refreshSyncStatus({ sendMessage });
   } catch (error) {
     el('sync-message').textContent =
       `Status unavailable: ${errorMessage(error)}`;
@@ -706,7 +721,7 @@ function importedCount(value) {
   return Array.isArray(value) ? value.length : 0;
 }
 
-function importSuccessMessage(settings) {
+function importSuccessMessage(settings, dropped = []) {
   const subscriptions = importedCount(settings.local?.subs?.ids);
   const blocked = importedCount(settings.local?.blocklist);
   const watched = importedCount(settings.local?.watched);
@@ -714,7 +729,10 @@ function importSuccessMessage(settings) {
     ? Object.keys(settings.sync.channelOverrides).length
     : 0;
   return `Imported ${subscriptions} subscriptions, ${blocked} blocked channels, ` +
-    `${watched} watched videos, ${overrides} channel overrides.`;
+    `${watched} watched videos, ${overrides} channel overrides.` +
+    (dropped.length > 0
+      ? ` Ignored unknown or invalid entries: ${dropped.join(', ')}.`
+      : '');
 }
 
 async function rerenderImportedSettings() {
@@ -800,9 +818,29 @@ export async function importSettings({
     }
     const { hasLocal, hasSync } = validateSettingsFile(settings);
 
+    // A settings file is untrusted input: keep only known keys with valid
+    // values, and never let it turn on account feedback unnoticed.
+    const cleanedLocal = hasLocal
+      ? cleanLocalArea(excludeSyncLocalValues(settings.local))
+      : { values: {}, dropped: [] };
+    const cleanedSync = hasSync
+      ? cleanSyncArea(settings.sync)
+      : { values: {}, dropped: [] };
+    const dropped = [...cleanedLocal.dropped, ...cleanedSync.dropped];
+    const cleaned = {
+      ...(hasLocal ? { local: cleanedLocal.values } : {}),
+      ...(hasSync ? { sync: cleanedSync.values } : {}),
+    };
+    const feedbackFlags = accountFeedbackFlags(cleanedSync.values.config);
+
     const confirmed = confirmFn(
       'Importing this file will replace the existing settings in each ' +
-      'included storage area. Continue?',
+      'included storage area.' +
+      (feedbackFlags.length > 0
+        ? ' WARNING: this file turns on a setting that sends feedback to ' +
+          `your Google account: ${feedbackFlags.join('; ')}.`
+        : '') +
+      ' Continue?',
     );
     if (!confirmed) {
       statusElement.textContent = 'Import cancelled.';
@@ -814,17 +852,11 @@ export async function importSettings({
       replacements.push({
         preserveSyncLocal: true,
         storageArea: localStorage,
-        values: excludeSyncLocalValues(settings.local),
+        values: cleaned.local,
       });
     }
     if (hasSync) {
-      const syncValues = { ...settings.sync };
-      if (Object.hasOwn(syncValues, 'channelOverrides')) {
-        syncValues.channelOverrides = Object.fromEntries(
-          normalizeOverrides(syncValues.channelOverrides),
-        );
-      }
-      replacements.push({ storageArea: syncStorage, values: syncValues });
+      replacements.push({ storageArea: syncStorage, values: cleaned.sync });
     }
     const previousValues = await Promise.all(
       replacements.map(({ storageArea }) => storageArea.get(null)),
@@ -858,7 +890,7 @@ export async function importSettings({
       throw error;
     }
     await renderResult();
-    statusElement.textContent = importSuccessMessage(settings);
+    statusElement.textContent = importSuccessMessage(cleaned, dropped);
     return true;
   } catch (error) {
     statusElement.textContent = `Import failed: ${error.message}`;

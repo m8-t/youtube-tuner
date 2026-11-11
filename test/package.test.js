@@ -102,9 +102,19 @@ test('manifest and package versions stay in sync', async () => {
     readFile('manifest.json', 'utf8').then(JSON.parse),
     readFile('package.json', 'utf8').then(JSON.parse),
   ]);
-  assert.equal(packageJson.version, '1.7.0');
+  assert.equal(packageJson.version, '1.7.1');
   assert.equal(manifest.version, packageJson.version);
   assert.equal(manifest.version_name, undefined);
-  assert.deepEqual(manifest.host_permissions, ['*://*.youtube.com/*']);
+  // Exactly the one origin the content script runs on: no other subdomain
+  // and no plain http.
+  assert.deepEqual(manifest.host_permissions, ['https://www.youtube.com/*']);
+  assert.deepEqual(
+    manifest.content_scripts[0].matches,
+    ['https://www.youtube.com/*'],
+  );
+  assert.match(
+    manifest.content_security_policy.extension_pages,
+    /script-src 'self'; object-src 'none'/,
+  );
   assert.deepEqual(manifest.permissions, ['storage', 'alarms', 'scripting']);
 });

@@ -158,6 +158,8 @@ function makeEngine({
   backend,
   keyStore = fakeKeyStore(),
   now = () => NOW,
+  minIterations = 1000,
+  minPassphraseLength = 1,
 }) {
   return createSyncEngine({
     storage,
@@ -165,6 +167,10 @@ function makeEngine({
     keyStore,
     now,
     log: () => {},
+    // Production floors are 600000 iterations and 12 characters; the tests
+    // derive keys with 1000 iterations to stay fast.
+    minIterations,
+    minPassphraseLength,
   });
 }
 
@@ -1452,4 +1458,117 @@ test('disable clears sync-private state but preserves user data', async () => {
   assert.ok(storage.values.sync.config);
   assert.ok(storage.values.sync.channelOverrides);
   assert.equal(keys.cleared, true);
+});
+
+test('enable refuses a remote file with a weak key derivation', async () => {
+  const salt = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const blob = await encrypt(
+    storageToDoc(DEFAULT_CONFIG, {}, [], [], [], 'remote-actor', NOW - 1),
+    await encryptionKey('correct passphrase', salt),
+  );
+  const storage = fakeStorage();
+  const keys = fakeKeyStore();
+  const engine = makeEngine({
+    storage,
+    keyStore: keys,
+    minIterations: 600_000,
+    backend: {
+      async test() { return CAPABILITIES; },
+      async read() { return { blob, revision: '"1"' }; },
+      async write() { throw new Error('must not upload'); },
+    },
+  });
+
+  const result = await engine.enable(SETTINGS, 'correct passphrase');
+
+  assert.match(result.error, /weaker key derivation/);
+  assert.equal(keys.record, null);
+  assert.equal(storage.values.local.syncSettings, undefined);
+});
+
+test('enable refuses a short passphrase for a new sync file', async () => {
+  const storage = fakeStorage();
+  const keys = fakeKeyStore();
+  const engine = makeEngine({
+    storage,
+    keyStore: keys,
+    minPassphraseLength: 12,
+    backend: {
+      async test() { return CAPABILITIES; },
+      async read() { return null; },
+      async write() { throw new Error('must not upload'); },
+    },
+  });
+
+  const result = await engine.enable(SETTINGS, 'short');
+
+  assert.match(result.error, /at least 12 characters/);
+  assert.equal(keys.record, null);
+});
+
+test('status exposes the server and user but never the password', async () => {
+  const storage = fakeStorage({ local: { syncSettings: SETTINGS } });
+  const engine = makeEngine({ storage, backend: {} });
+
+  const status = await engine.status();
+
+  assert.equal(status.url, SETTINGS.url);
+  assert.equal(status.username, SETTINGS.username);
+  assert.equal(JSON.stringify(status).includes(SETTINGS.password), false);
+});
+
+test('a connection test reuses the saved password only for the saved server', async () => {
+  const seen = [];
+  const storage = fakeStorage({ local: { syncSettings: SETTINGS } });
+  const engine = createSyncEngine({
+    storage,
+    keyStore: fakeKeyStore(),
+    log: () => {},
+    backendFactory: (settings) => {
+      seen.push(settings);
+      return { async test() { return CAPABILITIES; } };
+    },
+  });
+
+  await engine.testConnection({
+    url: SETTINGS.url,
+    username: SETTINGS.username,
+    password: '',
+  });
+  await engine.testConnection({
+    url: 'https://other.example/file.bin',
+    username: SETTINGS.username,
+    password: '',
+  });
+
+  assert.equal(seen[0].password, SETTINGS.password);
+  assert.equal(seen[1].password, '');
+});
+
+test('private sync state goes to the injected store, not chrome.storage', async () => {
+  const storage = fakeStorage();
+  const privateStorage = fakeStorage().local;
+  const engine = createSyncEngine({
+    storage,
+    privateStorage,
+    keyStore: fakeKeyStore(),
+    log: () => {},
+    minPassphraseLength: 1,
+    backendFactory: () => ({
+      async test() { return CAPABILITIES; },
+      async read() { return null; },
+      async write() { return '"1"'; },
+    }),
+  });
+
+  const result = await engine.enable(SETTINGS, 'passphrase');
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(storage.values.local.syncSettings, undefined);
+  assert.equal(storage.values.local.syncDoc, undefined);
+  assert.equal(storage.values.local.syncMeta, undefined);
+  assert.equal(
+    (await privateStorage.get('syncSettings')).syncSettings.password,
+    SETTINGS.password,
+  );
 });

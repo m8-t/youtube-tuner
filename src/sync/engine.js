@@ -33,6 +33,8 @@ const DEFAULT_META = Object.freeze({
   dirty: false,
 });
 const MAX_WRITE_ATTEMPTS = 3;
+export const MIN_PBKDF2_ITERATIONS = 600_000;
+export const MIN_PASSPHRASE_LENGTH = 12;
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -210,11 +212,23 @@ export function createSyncEngine({
   storage,
   backendFactory,
   keyStore,
+  // Holds credentials, the sync document and sync state. Production passes
+  // the IndexedDB store; content scripts cannot reach that one.
+  privateStorage = storage?.local,
+  minIterations = MIN_PBKDF2_ITERATIONS,
+  minPassphraseLength = MIN_PASSPHRASE_LENGTH,
   now = Date.now,
   log = console,
 } = {}) {
   if (!storage?.local || !storage?.sync) {
     throw new TypeError('storage.local and storage.sync are required');
+  }
+  if (
+    typeof privateStorage?.get !== 'function'
+    || typeof privateStorage?.set !== 'function'
+    || typeof privateStorage?.remove !== 'function'
+  ) {
+    throw new TypeError('privateStorage is invalid');
   }
   if (typeof backendFactory !== 'function') {
     throw new TypeError('backendFactory must be a function');
@@ -238,7 +252,7 @@ export function createSyncEngine({
   }
 
   async function readPrivateState() {
-    const stored = await storage.local.get([
+    const stored = await privateStorage.get([
       SYNC_DOC_KEY,
       SYNC_META_KEY,
       SYNC_SETTINGS_KEY,
@@ -272,17 +286,17 @@ export function createSyncEngine({
   }
 
   async function writeMeta(nextMeta) {
-    const stored = await storage.local.get(SYNC_META_KEY);
+    const stored = await privateStorage.get(SYNC_META_KEY);
     const current = normalizeMeta(stored[SYNC_META_KEY]);
     const next = normalizeMeta(nextMeta);
     if (!equal(current, next) || stored[SYNC_META_KEY] === undefined) {
-      await storage.local.set({ [SYNC_META_KEY]: next });
+      await privateStorage.set({ [SYNC_META_KEY]: next });
     }
     return next;
   }
 
   async function patchMeta(patch) {
-    const stored = await storage.local.get(SYNC_META_KEY);
+    const stored = await privateStorage.get(SYNC_META_KEY);
     return writeMeta({
       ...normalizeMeta(stored[SYNC_META_KEY]),
       ...patch,
@@ -291,12 +305,12 @@ export function createSyncEngine({
 
   async function persistDocument(doc) {
     const normalized = normalizeDocument(doc);
-    const stored = await storage.local.get(SYNC_DOC_KEY);
+    const stored = await privateStorage.get(SYNC_DOC_KEY);
     if (
       stored[SYNC_DOC_KEY] === undefined
       || !documentsEqual(stored[SYNC_DOC_KEY], normalized)
     ) {
-      await storage.local.set({ [SYNC_DOC_KEY]: normalized });
+      await privateStorage.set({ [SYNC_DOC_KEY]: normalized });
       return true;
     }
     return false;
@@ -687,18 +701,35 @@ export function createSyncEngine({
         if (typeof globalThis.crypto?.getRandomValues !== 'function') {
           throw new CryptoError('WebCrypto is unavailable');
         }
+        // Only a new sync file can enforce this; an existing file keeps the
+        // passphrase it was created with.
+        if (
+          typeof passphrase !== 'string'
+          || passphrase.length < minPassphraseLength
+        ) {
+          return {
+            error: `The passphrase needs at least ${minPassphraseLength} characters`,
+          };
+        }
         salt = globalThis.crypto.getRandomValues(new Uint8Array(32));
       } else {
         ({ salt, iters } = parseHeader(remote.blob ?? remote.doc));
+        // The header comes from the server. Refuse a file that asks for a
+        // cheaper key derivation than this extension ever writes.
+        if (iters < minIterations) {
+          return {
+            error: 'The remote file uses a weaker key derivation than allowed',
+          };
+        }
       }
       const key = await deriveKey(passphrase, salt, iters);
       const remoteDoc = await decryptRemote(remote, key);
       const currentMeta = normalizeMeta(
-        (await storage.local.get(SYNC_META_KEY))[SYNC_META_KEY],
+        (await privateStorage.get(SYNC_META_KEY))[SYNC_META_KEY],
       );
 
       await keyStore.saveKey({ key, salt, iters: iters ?? 600_000 });
-      await storage.local.set({
+      await privateStorage.set({
         [SYNC_SETTINGS_KEY]: savedSettings,
         [SYNC_META_KEY]: {
           revision: remote?.revision ?? null,
@@ -720,9 +751,31 @@ export function createSyncEngine({
     }
   }
 
+  // The options page never holds the saved password, so a test of the
+  // unchanged server reuses the stored one.
+  async function testConnection(settings) {
+    const candidate = {
+      url: settings?.url ?? '',
+      username: settings?.username ?? '',
+      password: settings?.password ?? '',
+    };
+    if (candidate.password === '') {
+      const { settings: saved } = await readPrivateState();
+      if (
+        saved?.url === candidate.url
+        && saved?.username === candidate.username
+        && typeof saved?.password === 'string'
+      ) {
+        candidate.password = saved.password;
+      }
+    }
+    const backend = await backendFactory(candidate);
+    return backend.test();
+  }
+
   async function disable() {
     await Promise.all([
-      storage.local.remove([
+      privateStorage.remove([
         SYNC_SETTINGS_KEY,
         SYNC_DOC_KEY,
         SYNC_META_KEY,
@@ -734,9 +787,15 @@ export function createSyncEngine({
 
   async function status() {
     const { settings, meta } = await readPrivateState();
+    // The password is deliberately not part of the status: no page needs to
+    // read it back once it is saved.
     return {
       enabled: settings?.enabled === true,
       configured: configured(settings),
+      url: typeof settings?.url === 'string' ? settings.url : '',
+      username: typeof settings?.username === 'string'
+        ? settings.username
+        : '',
       lastSyncAt: meta.lastSyncAt,
       lastError: meta.lastError,
     };
@@ -749,5 +808,6 @@ export function createSyncEngine({
     enable,
     disable,
     status,
+    testConnection,
   };
 }

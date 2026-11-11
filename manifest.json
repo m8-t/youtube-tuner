@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "youtube-tuner",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Hides old, already-watched, low-view and blocked-channel videos from YouTube recommendations.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -10,12 +10,16 @@
     "128": "icons/icon-128.png"
   },
   "permissions": ["storage", "alarms", "scripting"],
-  "host_permissions": ["*://*.youtube.com/*"],
+  "host_permissions": ["https://www.youtube.com/*"],
   "optional_host_permissions": ["https://*/*"],
+  "minimum_chrome_version": "120",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+  },
   "background": { "service_worker": "dist/background.js" },
   "content_scripts": [
     {
-      "matches": ["*://www.youtube.com/*"],
+      "matches": ["https://www.youtube.com/*"],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
     }

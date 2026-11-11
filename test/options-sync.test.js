@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  disableSync,
   enableSync,
   exportSettings,
   formatSyncCapabilities,
@@ -79,26 +80,21 @@ test('options page renders a Sync fieldset with its controls', () => {
 
 test('sync status populates status and configured fields on page setup', async (t) => {
   const harness = syncHarness(t);
-  await harness.localStorage.set({
-    syncSettings: {
-      enabled: true,
-      url: 'https://cloud.example.com/dav/youtube-tuner.bin',
-      username: 'alice',
-      password: 'app-secret',
-    },
-  });
   harness.documentObject.getElementById('sync-passphrase').value =
+    'must-not-survive';
+  harness.documentObject.getElementById('sync-password').value =
     'must-not-survive';
   const sent = [];
 
   await setupSyncControls({
-    localStorage: harness.localStorage,
     requestPermission: async () => true,
     sendMessage: async (message) => {
       sent.push(message);
       return {
         configured: true,
         enabled: true,
+        url: 'https://cloud.example.com/dav/youtube-tuner.bin',
+        username: 'alice',
         lastSyncAt: '2026-07-29T12:34:56.000Z',
         lastError: 'previous failure',
       };
@@ -114,9 +110,10 @@ test('sync status populates status and configured fields on page setup', async (
     harness.documentObject.getElementById('sync-username').value,
     'alice',
   );
+  // The saved app password is never rendered back into the page.
   assert.equal(
     harness.documentObject.getElementById('sync-password').value,
-    'app-secret',
+    '',
   );
   assert.equal(
     harness.documentObject.getElementById('sync-passphrase').value,
@@ -389,4 +386,50 @@ test('settings import ignores local sync keys and preserves current sync state',
     ...currentSyncState,
     watched: ['video-2'],
   });
+});
+
+test('Disable sync gives the WebDAV host permission back', async (t) => {
+  syncHarness(t);
+  const removed = [];
+  const messages = [];
+
+  const result = await disableSync({
+    removePermission: async (request) => {
+      removed.push(request);
+      return true;
+    },
+    sendMessage: async (message) => {
+      messages.push(message.type);
+      if (message.type === 'sync-disable') return { ok: true };
+      return {
+        enabled: messages.includes('sync-disable') ? false : true,
+        url: messages.includes('sync-disable')
+          ? ''
+          : 'https://cloud.example.com/dav/youtube-tuner.bin',
+        username: 'alice',
+      };
+    },
+  });
+
+  assert.equal(result, true);
+  assert.deepEqual(removed, [{ origins: ['https://cloud.example.com/*'] }]);
+});
+
+test('Disable sync never releases a YouTube origin', async (t) => {
+  syncHarness(t);
+  const removed = [];
+
+  await disableSync({
+    removePermission: async (request) => {
+      removed.push(request);
+      return true;
+    },
+    sendMessage: async (message) => (
+      message.type === 'sync-disable'
+        ? { ok: true }
+        : { enabled: true, url: 'https://www.youtube.com/file.bin' }
+    ),
+  });
+
+  assert.deepEqual(removed, []);
 });
